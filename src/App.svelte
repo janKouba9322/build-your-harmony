@@ -9,7 +9,6 @@
 <div class="wrap">
   <Masthead />
   <RecorderCard />
-  <AnalysisCard tones={sampleTones} />
 
   <footer class="foot">
     Nahrávka nikam neodchází · žádný účet, žádný server, žádné ukládání

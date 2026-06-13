@@ -1,18 +1,70 @@
 <script lang="ts">
-  // Lokální vizuální stav tlačítka — zatím jen přepíná popisek.
-  // Skutečný mikrofon sem přijde později.
+  import { onDestroy } from "svelte";
+  import { RecordHandler } from "./audio";
+  import { freqToMidi, midiToName } from "./musicTheory";
+  import PitchCanvas from "./PitchCanvas.svelte";
+  import { Segmenter } from "./segmenter";
+
   let recording = $state(false);
+  let currentNote = $state("–"); // large readout
+  let currentConfident = $state(false);
+  let hasSamples = $state(false); // enables the "start over" button
+
+  const handler = new RecordHandler();
+  const segmenter = new Segmenter();
+  let canvas: PitchCanvas; // child instance (bind:this) for push()/clear()
+
+  function onPitch(freq: number, clarity: number) {
+    const valid = freq > 70 && freq < 1100 && Number.isFinite(freq);
+    const confident = valid && clarity > 0.95;
+    const midi = valid ? freqToMidi(freq) : NaN;
+    if (valid) {
+      canvas.push(midi, confident);
+      segmenter.add(clarity, midi);
+    }
+    hasSamples = true;
+
+    if (confident) {
+      currentNote = midiToName(midi);
+      currentConfident = true;
+    } else {
+      currentConfident = false;
+    }
+  }
 
   function toggle() {
-    recording = !recording;
+    if (!recording) {
+      handler.startRecording(onPitch);
+      recording = true;
+    } else {
+      handler.stopRecording();
+      segmenter.finish();
+      console.log(segmenter.notes);
+      recording = false;
+      currentConfident = false;
+    }
   }
+
+  function reset() {
+    handler.stopRecording();
+    recording = false;
+    currentNote = "–";
+    currentConfident = false;
+    hasSamples = false;
+    segmenter.reset();
+    canvas.clear();
+  }
+
+  onDestroy(() => handler.stopRecording());
 </script>
 
 <section class="card" aria-label="Nahrávání melodie">
   <div class="live-row">
-    <div class="note-readout dim">–</div>
+    <div class="note-readout" class:dim={!currentConfident}>{currentNote}</div>
     <div class="live-meta">
-      <div class="status">{recording ? "poslouchám… (zatím nezapojeno)" : "mikrofon vypnutý"}</div>
+      <div class="status">
+        {recording ? "poslouchám…" : "mikrofon vypnutý"}
+      </div>
       <div class="legend">
         <span><i class="swatch swatch--on"></i>jistý tón</span>
         <span><i class="swatch swatch--off"></i>nejistý</span>
@@ -20,13 +72,25 @@
     </div>
   </div>
 
-  <canvas class="trace" aria-label="Živá stopa výšky hlasu"></canvas>
+  <div class="canvas-wrap">
+    <PitchCanvas bind:this={canvas} />
+  </div>
 
   <div class="controls">
-    <button class="btn btn--primary" class:is-recording={recording} onclick={toggle}>
+    <button
+      class="btn btn--primary"
+      class:is-recording={recording}
+      onclick={toggle}
+    >
       {recording ? "Hotovo — zpracovat" : "Zapnout mikrofon"}
     </button>
-    <button class="btn btn--ghost" disabled={!recording}>Začít znovu</button>
+    <button
+      class="btn btn--ghost"
+      disabled={!recording && !hasSamples}
+      onclick={reset}
+    >
+      Začít znovu
+    </button>
   </div>
 
   <p class="hint">
@@ -36,6 +100,7 @@
 </section>
 
 <style>
+  /* card container */
   .card {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -43,14 +108,14 @@
     padding: clamp(18px, 4vw, 28px);
     margin-bottom: 20px;
   }
-
+  /* top row: big readout + status/legend */
   .live-row {
     display: flex;
     align-items: center;
     gap: clamp(16px, 4vw, 24px);
     flex-wrap: wrap;
   }
-
+  /* large live note readout */
   .note-readout {
     font-family: var(--font-display);
     font-weight: 800;
@@ -60,43 +125,54 @@
     min-width: 120px;
     transition: color 0.12s ease;
   }
-  .note-readout.dim { color: var(--uncertain); }
-
-  .live-meta { display: flex; flex-direction: column; gap: 10px; }
-
+  .note-readout.dim {
+    color: var(--uncertain);
+  }
+  .live-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
   .status {
     font-family: var(--font-mono);
     font-size: 13px;
     color: var(--muted);
   }
-
+  /* confident / uncertain legend */
   .legend {
     display: flex;
     gap: 16px;
     font-size: 12.5px;
     color: var(--muted);
   }
-  .legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; }
-  .swatch--on { background: var(--accent); }
-  .swatch--off { background: var(--uncertain); }
-
-  .trace {
-    width: 100%;
-    height: 120px;
-    display: block;
-    margin-top: 22px;
-    border-radius: 12px;
-    background: var(--bg);
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
   }
-
+  .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: none;
+  }
+  .swatch--on {
+    background: var(--accent);
+  }
+  .swatch--off {
+    background: var(--uncertain);
+  }
+  /* spacing wrapper around the canvas component */
+  .canvas-wrap {
+    margin-top: 22px;
+  }
+  /* control buttons */
   .controls {
     display: flex;
     gap: 12px;
     margin-top: 22px;
     flex-wrap: wrap;
   }
-
   .btn {
     font-family: var(--font-body);
     font-weight: 600;
@@ -105,16 +181,35 @@
     border-radius: 12px;
     padding: 13px 22px;
     cursor: pointer;
-    transition: transform 0.08s ease, background 0.15s ease, opacity 0.15s ease;
+    transition:
+      transform 0.08s ease,
+      background 0.15s ease,
+      opacity 0.15s ease;
   }
-  .btn:active { transform: translateY(1px); }
-  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .btn--primary { background: var(--accent); color: #241a00; }
-  .btn--primary.is-recording { background: var(--accent-2); color: #2a0d0a; }
-  .btn--ghost { background: var(--raised); color: var(--text); }
-
+  .btn:active {
+    transform: translateY(1px);
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .btn--primary {
+    background: var(--accent);
+    color: #241a00;
+  }
+  .btn--primary.is-recording {
+    background: var(--accent-2);
+    color: #2a0d0a;
+  }
+  .btn--ghost {
+    background: var(--raised);
+    color: var(--text);
+  }
+  /* helper hint text */
   .hint {
     font-family: var(--font-mono);
     font-size: 12.5px;
