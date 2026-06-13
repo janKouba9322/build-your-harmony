@@ -1,9 +1,4 @@
-type Note = {
-  sampleCount: number;
-  avgClarity: number;
-  avgMidifloat: number;
-  anchorMidifloat: number;
-};
+import type { Note } from "./types";
 
 const MIDI_THRESHOLD = 0.5;
 const ANCHOR_LOCK_LENGTH = 4;

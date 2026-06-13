@@ -4,6 +4,7 @@
   import { freqToMidi, midiToName } from "./musicTheory";
   import PitchCanvas from "./PitchCanvas.svelte";
   import { Segmenter } from "./segmenter";
+  import { buildChroma, detectKey } from "./detectKey";
 
   let recording = $state(false);
   let currentNote = $state("–"); // large readout
@@ -39,7 +40,8 @@
     } else {
       handler.stopRecording();
       segmenter.finish();
-      console.log(segmenter.notes);
+      const keyInfo = detectKey(buildChroma(segmenter.notes));
+      console.log(keyInfo);
       recording = false;
       currentConfident = false;
     }
