@@ -6,48 +6,54 @@
   import { Segmenter } from "./segmenter";
   import { buildChroma, detectKey } from "./detectKey";
 
+  // pitch-validity gating
+  const MIN_FREQ = 70;
+  const MAX_FREQ = 1100;
+  const CONFIDENCE_CLARITY = 0.95; // clarity above this counts as a "confident" sample
+
   let recording = $state(false);
-  let currentNote = $state("–"); // large readout
+  let currentNote = $state("–"); // large live readout
   let currentConfident = $state(false);
   let hasSamples = $state(false); // enables the "start over" button
 
-  let frameCount = 0;
+  let frameCount = 0; // absolute frame index, shared by canvas + segmenter
 
   const handler = new RecordHandler();
   const segmenter = new Segmenter();
-  let canvas: PitchCanvas; // child instance (bind:this) for push()/clear()
+  let canvas: PitchCanvas; // child instance (bind:this) for push()/tick()/finish()
+
+  function isValidPitch(freq: number): boolean {
+    return Number.isFinite(freq) && freq > MIN_FREQ && freq < MAX_FREQ;
+  }
 
   function onPitch(freq: number, clarity: number) {
-    const valid = freq > 70 && freq < 1100 && Number.isFinite(freq);
-    const confident = valid && clarity > 0.95;
     const frame = frameCount++;
+    const valid = isValidPitch(freq);
+    const confident = valid && clarity > CONFIDENCE_CLARITY;
     const midi = valid ? freqToMidi(freq) : NaN;
+
     if (valid) {
       canvas.push(frame, midi, confident);
       segmenter.add(frame, clarity, midi);
     }
-    canvas.tick(frame);
+    canvas.tick(frame); // advance the viewport every frame, even on silence
     hasSamples = true;
 
-    if (confident) {
-      currentNote = midiToName(midi);
-      currentConfident = true;
-    } else {
-      currentConfident = false;
-    }
+    currentConfident = confident;
+    if (confident) currentNote = midiToName(midi);
   }
 
   function toggle() {
-    const frame = frameCount;
     if (!recording) {
       handler.startRecording(onPitch);
       recording = true;
     } else {
       handler.stopRecording();
+      const frame = frameCount;
       segmenter.finish(frame);
       canvas.finish(segmenter.notes);
       const keyInfo = detectKey(buildChroma(segmenter.notes));
-      console.log(keyInfo);
+      console.log(keyInfo); // TODO: surface key estimate in the UI
       recording = false;
       currentConfident = false;
     }
