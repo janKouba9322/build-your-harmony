@@ -16,7 +16,10 @@
 </div>
 
 <style>
-  .wrap { width: 100%; max-width: var(--maxw); }
+  .wrap {
+    width: 100%;
+    max-width: var(--maxw);
+  }
 
   .foot {
     margin-top: 36px;

@@ -11,6 +11,8 @@
   let currentConfident = $state(false);
   let hasSamples = $state(false); // enables the "start over" button
 
+  let frameCount = 0;
+
   const handler = new RecordHandler();
   const segmenter = new Segmenter();
   let canvas: PitchCanvas; // child instance (bind:this) for push()/clear()
@@ -18,11 +20,13 @@
   function onPitch(freq: number, clarity: number) {
     const valid = freq > 70 && freq < 1100 && Number.isFinite(freq);
     const confident = valid && clarity > 0.95;
+    const frame = frameCount++;
     const midi = valid ? freqToMidi(freq) : NaN;
     if (valid) {
-      canvas.push(midi, confident);
-      segmenter.add(clarity, midi);
+      canvas.push(frame, midi, confident);
+      segmenter.add(frame, clarity, midi);
     }
+    canvas.tick(frame);
     hasSamples = true;
 
     if (confident) {
@@ -34,12 +38,14 @@
   }
 
   function toggle() {
+    const frame = frameCount;
     if (!recording) {
       handler.startRecording(onPitch);
       recording = true;
     } else {
       handler.stopRecording();
-      segmenter.finish();
+      segmenter.finish(frame);
+      canvas.finish(segmenter.notes);
       const keyInfo = detectKey(buildChroma(segmenter.notes));
       console.log(keyInfo);
       recording = false;
@@ -53,6 +59,7 @@
     currentNote = "–";
     currentConfident = false;
     hasSamples = false;
+    frameCount = 0;
     segmenter.reset();
     canvas.clear();
   }

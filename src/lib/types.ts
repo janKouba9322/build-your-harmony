@@ -10,4 +10,6 @@ export type Note = {
   avgClarity: number;
   avgMidifloat: number;
   anchorMidifloat: number;
+  startFrame: number;
+  endFrame: number;
 };
