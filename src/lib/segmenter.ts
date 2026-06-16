@@ -1,29 +1,28 @@
 import type { Note } from "./types";
 
-// All thresholds are in *samples* (rAF frames), not milliseconds — see project TODO.
-const MIDI_THRESHOLD = 0.5; // how close a pitch must be to count as the same note
-const ANCHOR_LOCK_LENGTH = 4; // after this many samples the anchor pitch is frozen
-const MIN_NOTE_SAMPLE_COUNT = 12; // shorter blips get discarded
-const MAX_GAP_LENGTH = 5; // a return within this many samples re-joins the previous note
+const MIDI_THRESHOLD = 0.6; // how close a pitch must be (semitones) to count as the same note
+const ANCHOR_LOCK_FRAME_LENGTH = 10; // after this many frames the anchor pitch freezes (resists slow drift)
+const MIN_NOTE_DURATION = 0.1; // notes shorter than this (seconds) are discarded as blips
+const MAX_GAP_DURATION = 0.05; // a return within this gap (seconds) re-joins the previous note
 
 function emptyNote(): Note {
   return {
-    sampleCount: 0,
+    duration: 0,
+    frameLength: 0,
     avgClarity: 0,
     avgMidifloat: 0,
     anchorMidifloat: 0,
-    startFrame: 0,
-    endFrame: 0,
+    startTime: 0,
+    endTime: 0,
   };
 }
 
 export class Segmenter {
   public notes: Note[] = [];
   private currentNote: Note = emptyNote();
-  private gapLength = MAX_GAP_LENGTH + 1;
 
-  add(frame: number, clarity: number, midifloat: number) {
-    const isEmpty = this.currentNote.sampleCount === 0;
+  add(time: number, clarity: number, midifloat: number) {
+    const isEmpty = this.currentNote.frameLength === 0;
 
     // does this sample continue the note currently being built?
     const fits =
@@ -33,30 +32,27 @@ export class Segmenter {
     // or does it return to the previous note after a short dropout?
     const prev = this.notes[this.notes.length - 1];
     const fitsPrev =
-      this.gapLength <= MAX_GAP_LENGTH &&
       prev !== undefined &&
+      time - prev.endTime <= MAX_GAP_DURATION &&
       Math.abs(midifloat - prev.anchorMidifloat) < MIDI_THRESHOLD;
 
     if (fits) {
-      this.extendNote(clarity, midifloat);
+      this.extendNote(time, clarity, midifloat);
     } else if (fitsPrev) {
       // pull the previous note back out and keep extending it across the gap
       this.currentNote = this.notes.pop()!;
-      this.extendNote(clarity, midifloat);
+      this.extendNote(time, clarity, midifloat);
     } else if (isEmpty) {
-      this.startNote(frame, clarity, midifloat);
+      this.startNote(time, clarity, midifloat);
     } else {
       // pitch jumped: close what we had and open a fresh note
-      this.closeNote(frame);
-      this.startGap();
-      this.startNote(frame, clarity, midifloat);
+      this.closeNote(time);
+      this.startNote(time, clarity, midifloat);
     }
-
-    this.gapLength += 1;
   }
 
-  finish(frame: number): Note[] {
-    this.closeNote(frame);
+  finish(time: number): Note[] {
+    this.closeNote(time);
     return this.notes;
   }
 
@@ -65,21 +61,24 @@ export class Segmenter {
     this.currentNote = emptyNote();
   }
 
-  private startNote(frame: number, clarity: number, midifloat: number) {
+  private startNote(time: number, clarity: number, midifloat: number) {
     this.currentNote = {
-      sampleCount: 1,
+      duration: 0,
+      frameLength: 1,
       avgClarity: clarity,
       avgMidifloat: midifloat,
       anchorMidifloat: midifloat,
-      startFrame: frame,
-      endFrame: frame,
+      startTime: time,
+      endTime: time,
     };
   }
 
-  private extendNote(clarity: number, midifloat: number) {
-    const prev = this.currentNote.sampleCount;
+  private extendNote(time: number, clarity: number, midifloat: number) {
+    const prev = this.currentNote.frameLength;
     const n = prev + 1;
-    this.currentNote.sampleCount = n;
+    this.currentNote.frameLength = n;
+    this.currentNote.endTime = time;
+    this.currentNote.duration = time - this.currentNote.startTime;
 
     // running averages over the whole note
     this.currentNote.avgClarity =
@@ -87,22 +86,19 @@ export class Segmenter {
     this.currentNote.avgMidifloat =
       (this.currentNote.avgMidifloat * prev + midifloat) / n;
 
-    // the anchor only averages the first few samples, then locks (resists slow drift)
-    if (n <= ANCHOR_LOCK_LENGTH) {
+    // the anchor only averages the first few frames, then locks
+    if (n <= ANCHOR_LOCK_FRAME_LENGTH) {
       this.currentNote.anchorMidifloat =
         (this.currentNote.anchorMidifloat * prev + midifloat) / n;
     }
   }
 
-  private closeNote(frame: number) {
-    this.currentNote.endFrame = frame;
-    if (this.currentNote.sampleCount >= MIN_NOTE_SAMPLE_COUNT) {
+  private closeNote(time: number) {
+    this.currentNote.endTime = time;
+    this.currentNote.duration = time - this.currentNote.startTime;
+    if (this.currentNote.duration >= MIN_NOTE_DURATION) {
       this.notes.push({ ...this.currentNote }); // copy; currentNote is reset right after
     }
     this.currentNote = emptyNote();
-  }
-
-  private startGap() {
-    this.gapLength = 1;
   }
 }

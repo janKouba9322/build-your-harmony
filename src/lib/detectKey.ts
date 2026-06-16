@@ -1,6 +1,55 @@
 import { KK_MAJOR, KK_MINOR } from "./constans";
 import type { Note } from "./types";
 
+// --- public pipeline: straighten → buildChroma → detectKey ---
+
+// Correct for consistent detuning by shifting every note by one shared offset
+// (median deviation from the semitone grid). Does NOT round — keeps the fine
+// pitch so callers can still see how close each note sat to the grid.
+export function straightenNotes(notes: Note[]): Note[] {
+  const offset = findTuningOffset(notes);
+  return notes.map((n) => ({ ...n, avgMidifloat: n.avgMidifloat - offset }));
+}
+
+// Weighted pitch-class histogram (weight = sampleCount × avgClarity).
+// Rounds to a pitch class here, where the integer is actually needed.
+export function buildChroma(notes: Note[]): number[] {
+  const chroma = new Array(12).fill(0);
+  for (const note of notes) {
+    const pitchClass = ((Math.round(note.avgMidifloat) % 12) + 12) % 12;
+    chroma[pitchClass] += note.duration * note.avgClarity;
+  }
+  return chroma;
+}
+
+// Correlate the chroma against all 24 rotated Krumhansl-Kessler profiles,
+// pick the best. Confidence is the (rough) margin over the runner-up.
+export function detectKey(chroma: number[]) {
+  let best = { score: -2, tonic: 0, mode: "dur" as "dur" | "moll" };
+  let second = -2;
+
+  for (let tonic = 0; tonic < 12; tonic++) {
+    for (const [mode, prof] of [
+      ["dur", KK_MAJOR],
+      ["moll", KK_MINOR],
+    ] as const) {
+      const rotated = prof.map((_, i) => prof[(i - tonic + 12) % 12]);
+      const score = correlate(chroma, rotated);
+      if (score > best.score) {
+        second = best.score;
+        best = { score, tonic, mode };
+      } else if (score > second) {
+        second = score;
+      }
+    }
+  }
+
+  const confidence = Math.max(0, Math.min(1, (best.score - second) * 2.2));
+  return { ...best, confidence };
+}
+
+// --- internal helpers (pure) ---
+
 function correlate(a: number[], b: number[]): number {
   const n = a.length;
   const ma = a.reduce((s, v) => s + v, 0) / n;
@@ -22,51 +71,13 @@ function offsetFromGrid(midifloat: number): number {
   return midifloat - Math.round(midifloat);
 }
 
-function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
 function findTuningOffset(notes: Note[]): number {
   const offsets = notes.map((n) => offsetFromGrid(n.avgMidifloat));
   return median(offsets);
 }
 
-function straighten(notes: Note[], offset: number): Note[] {
-  return notes.map((n) => ({
-    ...n,
-    avgMidifloat: Math.round(n.avgMidifloat - offset),
-  }));
-}
-
-export function detectKey(chroma: number[]) {
-  let best = { score: -2, tonic: 0, mode: "dur" };
-  let second = -2;
-  for (let tonic = 0; tonic < 12; tonic++) {
-    for (const [mode, prof] of [
-      ["dur", KK_MAJOR],
-      ["moll", KK_MINOR],
-    ] as const) {
-      const rotated = prof.map((_, i) => prof[(i - tonic + 12) % 12]);
-      const score = correlate(chroma, rotated);
-      if (score > best.score) {
-        second = best.score;
-        best = { score, tonic, mode };
-      } else if (score > second) {
-        second = score;
-      }
-    }
-  }
-  const confidence = Math.max(0, Math.min(1, (best.score - second) * 2.2));
-  return { ...best, confidence };
-}
-export function buildChroma(notes: Note[]): number[] {
-  const chroma = new Array(12).fill(0);
-  const straightenedNotes = straighten(notes, findTuningOffset(notes));
-  for (const note of straightenedNotes) {
-    const pitchClass = ((Math.round(note.avgMidifloat) % 12) + 12) % 12;
-    chroma[pitchClass] += note.sampleCount * note.avgClarity;
-  }
-  return chroma;
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }

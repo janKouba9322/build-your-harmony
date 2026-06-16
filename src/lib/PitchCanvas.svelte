@@ -1,40 +1,40 @@
 <script lang="ts">
   // Live pitch-trace canvas. Owns its own drawing, history and viewport.
+  // The horizontal axis is in *seconds* (from audioContext time), so it stays
+  // faithful to real time regardless of rAF jitter — and lines up with playback.
   // Parent feeds samples via push(), advances the view via tick(),
   // and freezes into a scrollable review via finish().
   import { midiToName } from "./musicTheory";
   import { tick as domTick } from "svelte";
   import type { Note } from "./types";
 
-  type Sample = { frame: number; midi: number; confident: boolean };
+  type Sample = { time: number; midi: number; confident: boolean };
 
-  const VISIBLE_FRAMES = 400; // how many frames fit across the plot at once
+  const VISIBLE_SECONDS = 5; // how many seconds fit across the plot at once
 
   // visible vertical range in semitones (MIDI), eases to fit what's sung
   const DEFAULT_LO = 48; // C3
   const DEFAULT_HI = 72; // C5
   const MIN_SPAN = 14;
+  const GUTTER = 40; // left axis column (must match .scroller margin-left)
+  const NOTE_BAR_WIDTH = 8;
+
   let rangeLo = DEFAULT_LO;
   let rangeHi = DEFAULT_HI;
 
-  // horizontal viewport: [firstVisibleFrame, +VISIBLE_FRAMES]
-  let firstVisibleFrame = 0;
-  let lastFrame = -1;
+  // horizontal viewport: [firstVisibleTime, +VISIBLE_SECONDS] in seconds
+  let firstVisibleTime = 0;
+  let lastTime = 0;
 
   const history: Sample[] = [];
-  let notes: Note[] = []; // decided notes from the segmenter, ready for upcoming bar rendering
+  let detectedNotes: Note[] = []; // decided notes from the segmenter (grid bars)
 
   let canvasEl: HTMLCanvasElement;
   let scrollerEl: HTMLDivElement;
   let spacerWidth = $state(0); // drives the phantom scrollbar's thumb size
 
   // colors pulled from the design tokens (canvas can't read CSS variables directly)
-  let palette: {
-    accent: string;
-    uncertain: string;
-    line: string;
-    muted: string;
-  } | null = null;
+  let palette: { [key: string]: string } | null = null;
 
   function readPalette() {
     const cs = getComputedStyle(document.documentElement);
@@ -43,12 +43,13 @@
       uncertain: cs.getPropertyValue("--uncertain").trim(),
       line: "rgba(255,255,255,0.07)",
       muted: cs.getPropertyValue("--muted").trim(),
+      yantar: cs.getPropertyValue("--yantar").trim(),
     };
   }
 
-  // leftmost frame that still keeps the newest sample pinned to the right edge
+  // leftmost time that still keeps the newest sample pinned to the right edge
   function maxFirst(): number {
-    return Math.max(0, lastFrame - VISIBLE_FRAMES + 1);
+    return Math.max(0, lastTime - VISIBLE_SECONDS);
   }
 
   // ease the vertical range toward the min/max of confident samples
@@ -90,15 +91,26 @@
 
     updateRange();
 
-    const GUTTER = 40; // left axis column (must match .scroller margin-left)
     const padY = 10;
     const plotW = w - GUTTER;
     const plotH = h - padY * 2;
 
-    const midiToY = (m: number) =>
+    const midiToY = (m: number): number =>
       padY + plotH - ((m - rangeLo) / (rangeHi - rangeLo)) * plotH;
-    const frameToX = (f: number) =>
-      GUTTER + ((f - firstVisibleFrame) / VISIBLE_FRAMES) * plotW;
+    const timeToX = (t: number): number =>
+      GUTTER + ((t - firstVisibleTime) / VISIBLE_SECONDS) * plotW;
+    const alignXToGutter = (startX: number, endX: number) => {
+      let x1: number = startX;
+      let x2: number = endX;
+      if (startX < GUTTER) {
+        x1 = GUTTER;
+      }
+      if (endX < GUTTER) {
+        x1 = -1;
+        x2 = -1;
+      }
+      return { x1, x2 };
+    };
 
     // --- horizontal gridlines + note labels (fixed left axis) ---
     ctx.font = '11px "Space Mono", monospace';
@@ -118,10 +130,25 @@
       ctx.fillText(midiToName(midi), 4, y);
     }
 
-    // --- pitch trace (raw per-frame samples) ---
+    // --- decided note bars (grid-snapped pitch, leading-voice amber) ---
+    ctx.strokeStyle = palette.yantar;
+    ctx.lineWidth = NOTE_BAR_WIDTH;
+    for (const note of detectedNotes) {
+      const { x1, x2 } = alignXToGutter(
+        timeToX(note.startTime),
+        timeToX(note.endTime),
+      );
+      const y = midiToY(Math.round(note.avgMidifloat)); // snap to the grid
+      ctx.beginPath();
+      ctx.moveTo(x1, y);
+      ctx.lineTo(x2, y);
+      ctx.stroke();
+    }
+
+    // --- raw pitch trace (per-frame samples) ---
     for (const s of history) {
       if (!Number.isFinite(s.midi)) continue;
-      const x = frameToX(s.frame);
+      const x = timeToX(s.time);
       if (x <= GUTTER) continue; // scrolled off behind the axis
       const y = midiToY(s.midi);
       ctx.beginPath();
@@ -138,39 +165,43 @@
   function onScroll() {
     const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
     const frac = max > 0 ? scrollerEl.scrollLeft / max : 0;
-    firstVisibleFrame = Math.round(frac * maxFirst());
+    firstVisibleTime = frac * maxFirst();
     draw();
   }
 
   // --- public API for the parent ---
 
   // store a raw sample; drawing is driven by tick(), not here
-  export function push(frame: number, midi: number, confident: boolean) {
-    history.push({ frame, midi, confident });
+  export function push(time: number, midi: number, confident: boolean) {
+    history.push({ time, midi, confident });
   }
 
-  // advance the viewport one frame and redraw — called every frame, even on silence
-  export function tick(frame: number) {
-    lastFrame = frame;
-    firstVisibleFrame = maxFirst();
+  // advance the viewport and redraw — called every frame, even on silence
+  export function tick(time: number) {
+    lastTime = time;
+    firstVisibleTime = maxFirst();
     draw();
   }
 
   export function clear() {
     history.length = 0;
-    notes = [];
+    detectedNotes = [];
     rangeLo = DEFAULT_LO;
     rangeHi = DEFAULT_HI;
+    firstVisibleTime = 0;
+    lastTime = 0;
+    spacerWidth = 0;
     draw();
   }
 
   // freeze into review mode: size the scrollbar to the take and jump to the end
-  export async function finish(detectedNotes: Note[]) {
-    notes = detectedNotes;
+  export async function finish(notes: Note[]) {
+    detectedNotes = notes;
     const view = scrollerEl.clientWidth || 1;
-    spacerWidth = view * Math.max(1, (lastFrame + 1) / VISIBLE_FRAMES);
+    spacerWidth = view * Math.max(1, lastTime / VISIBLE_SECONDS);
     await domTick(); // wait for the spacer to actually widen…
     scrollerEl.scrollLeft = scrollerEl.scrollWidth; // …then pin the thumb right (triggers onScroll → redraw)
+    draw();
   }
 </script>
 
@@ -211,13 +242,13 @@
     height: 10px;
   }
   .scroller::-webkit-scrollbar-track {
-    background: var(--surface);
+    background: var(--text);
     border-radius: 6px;
   }
   .scroller::-webkit-scrollbar-thumb {
     background: var(--muted);
     border-radius: 6px;
-    border: 2px solid var(--surface); /* inset look */
+    border: 2px solid var(--mutted); /* inset look */
   }
   .scroller::-webkit-scrollbar-thumb:hover {
     background: var(--accent);

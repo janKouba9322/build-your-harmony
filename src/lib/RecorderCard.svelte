@@ -4,7 +4,7 @@
   import { freqToMidi, midiToName } from "./musicTheory";
   import PitchCanvas from "./PitchCanvas.svelte";
   import { Segmenter } from "./segmenter";
-  import { buildChroma, detectKey } from "./detectKey";
+  import { buildChroma, detectKey, straightenNotes } from "./detectKey";
 
   // pitch-validity gating
   const MIN_FREQ = 70;
@@ -16,7 +16,7 @@
   let currentConfident = $state(false);
   let hasSamples = $state(false); // enables the "start over" button
 
-  let frameCount = 0; // absolute frame index, shared by canvas + segmenter
+  let lastTime = 0; // most recent sample time (seconds), used to close the final note
 
   const handler = new RecordHandler();
   const segmenter = new Segmenter();
@@ -26,17 +26,17 @@
     return Number.isFinite(freq) && freq > MIN_FREQ && freq < MAX_FREQ;
   }
 
-  function onPitch(freq: number, clarity: number) {
-    const frame = frameCount++;
+  function onPitch(freq: number, clarity: number, time: number) {
+    lastTime = time;
     const valid = isValidPitch(freq);
     const confident = valid && clarity > CONFIDENCE_CLARITY;
     const midi = valid ? freqToMidi(freq) : NaN;
 
     if (valid) {
-      canvas.push(frame, midi, confident);
-      segmenter.add(frame, clarity, midi);
+      canvas.push(time, midi, confident);
+      segmenter.add(time, clarity, midi);
     }
-    canvas.tick(frame); // advance the viewport every frame, even on silence
+    canvas.tick(time); // advance the viewport every frame, even on silence
     hasSamples = true;
 
     currentConfident = confident;
@@ -49,10 +49,9 @@
       recording = true;
     } else {
       handler.stopRecording();
-      const frame = frameCount;
-      segmenter.finish(frame);
-      canvas.finish(segmenter.notes);
+      segmenter.finish(lastTime);
       const keyInfo = detectKey(buildChroma(segmenter.notes));
+      canvas.finish(straightenNotes(segmenter.notes));
       console.log(keyInfo); // TODO: surface key estimate in the UI
       recording = false;
       currentConfident = false;
@@ -65,7 +64,7 @@
     currentNote = "–";
     currentConfident = false;
     hasSamples = false;
-    frameCount = 0;
+    lastTime = 0;
     segmenter.reset();
     canvas.clear();
   }
