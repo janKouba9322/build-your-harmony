@@ -4,22 +4,29 @@
   import { freqToMidi, midiToName } from "./musicTheory";
   import PitchCanvas from "./PitchCanvas.svelte";
   import { Segmenter } from "./segmenter";
-  import { buildChroma, detectKey, straightenNotes } from "./detectKey";
+  import { buildChroma, detectKey, snapNotesToGrid } from "./detectKey";
+  import { TonePlayer } from "./play";
+  import type { Note } from "./types";
 
   // pitch-validity gating
   const MIN_FREQ = 70;
   const MAX_FREQ = 1100;
   const CONFIDENCE_CLARITY = 0.95; // clarity above this counts as a "confident" sample
+  const ACCEPTABLE_CLARITY = 0.75;
 
   let recording = $state(false);
   let currentNote = $state("–"); // large live readout
   let currentConfident = $state(false);
   let hasSamples = $state(false); // enables the "start over" button
 
-  let lastTime = 0; // most recent sample time (seconds), used to close the final note
+  let playableNotes: Note[] = $state([]);
+  let playbackRaf: number | null = null;
+
+  let lastValidTime = 0;
 
   const handler = new RecordHandler();
   const segmenter = new Segmenter();
+  const tonePlayer = new TonePlayer();
   let canvas: PitchCanvas; // child instance (bind:this) for push()/tick()/finish()
 
   function isValidPitch(freq: number): boolean {
@@ -27,12 +34,12 @@
   }
 
   function onPitch(freq: number, clarity: number, time: number) {
-    lastTime = time;
-    const valid = isValidPitch(freq);
+    const valid = isValidPitch(freq) && clarity > ACCEPTABLE_CLARITY;
     const confident = valid && clarity > CONFIDENCE_CLARITY;
     const midi = valid ? freqToMidi(freq) : NaN;
 
     if (valid) {
+      lastValidTime = time;
       canvas.push(time, midi, confident);
       segmenter.add(time, clarity, midi);
     }
@@ -49,9 +56,11 @@
       recording = true;
     } else {
       handler.stopRecording();
-      segmenter.finish(lastTime);
-      const keyInfo = detectKey(buildChroma(segmenter.notes));
-      canvas.finish(straightenNotes(segmenter.notes));
+      segmenter.finish(lastValidTime);
+      const snapped = snapNotesToGrid(segmenter.notes);
+      playableNotes = snapped;
+      const keyInfo = detectKey(buildChroma(snapped));
+      canvas.finish(snapped);
       console.log(keyInfo); // TODO: surface key estimate in the UI
       recording = false;
       currentConfident = false;
@@ -59,14 +68,33 @@
   }
 
   function reset() {
+    tonePlayer.stop();
+    if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
+    playbackRaf = null;
+    canvas.setPlayhead(null);
     handler.stopRecording();
     recording = false;
     currentNote = "–";
     currentConfident = false;
     hasSamples = false;
-    lastTime = 0;
+    lastValidTime = 0;
     segmenter.reset();
     canvas.clear();
+  }
+
+  async function startPlayback() {
+    await tonePlayer.play(playableNotes); // straightened/snapped notes
+    const loop = () => {
+      const t = tonePlayer.playbackTime();
+      if (t === null) {
+        canvas.setPlayhead(null); // done → cursor gone
+        playbackRaf = null;
+        return;
+      }
+      canvas.setPlayhead(t);
+      playbackRaf = requestAnimationFrame(loop);
+    };
+    loop();
   }
 
   onDestroy(() => handler.stopRecording());
@@ -105,6 +133,9 @@
     >
       Začít znovu
     </button>
+    {#if !recording && playableNotes.length > 0}
+      <button class="btn btn--ghost" onclick={startPlayback}>▶ Přehrát</button>
+    {/if}
   </div>
 
   <p class="hint">

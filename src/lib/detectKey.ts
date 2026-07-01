@@ -6,17 +6,20 @@ import type { Note } from "./types";
 // Correct for consistent detuning by shifting every note by one shared offset
 // (median deviation from the semitone grid). Does NOT round — keeps the fine
 // pitch so callers can still see how close each note sat to the grid.
-export function straightenNotes(notes: Note[]): Note[] {
+export function snapNotesToGrid(notes: Note[]): Note[] {
   const offset = findTuningOffset(notes);
-  return notes.map((n) => ({ ...n, avgMidifloat: n.avgMidifloat - offset }));
+  return notes.map((n) => ({
+    ...n,
+    avgMidifloat: Math.round(n.avgMidifloat - offset),
+  }));
 }
 
 // Weighted pitch-class histogram (weight = sampleCount × avgClarity).
 // Rounds to a pitch class here, where the integer is actually needed.
-export function buildChroma(notes: Note[]): number[] {
+export function buildChroma(snappedNotes: Note[]): number[] {
   const chroma = new Array(12).fill(0);
-  for (const note of notes) {
-    const pitchClass = ((Math.round(note.avgMidifloat) % 12) + 12) % 12;
+  for (const note of snappedNotes) {
+    const pitchClass = ((note.avgMidifloat % 12) + 12) % 12;
     chroma[pitchClass] += note.duration * note.avgClarity;
   }
   return chroma;

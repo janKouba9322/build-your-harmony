@@ -10,7 +10,8 @@
 
   type Sample = { time: number; midi: number; confident: boolean };
 
-  const VISIBLE_SECONDS = 5; // how many seconds fit across the plot at once
+  const VISIBLE_SECONDS = 4;
+  const CURSOR_POSITION_RATIO = 0.8;
 
   // visible vertical range in semitones (MIDI), eases to fit what's sung
   const DEFAULT_LO = 48; // C3
@@ -32,6 +33,8 @@
   let canvasEl: HTMLCanvasElement;
   let scrollerEl: HTMLDivElement;
   let spacerWidth = $state(0); // drives the phantom scrollbar's thumb size
+
+  let playhead: number | null = null;
 
   // colors pulled from the design tokens (canvas can't read CSS variables directly)
   let palette: { [key: string]: string } | null = null;
@@ -158,6 +161,15 @@
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+    if (playhead !== null) {
+      const x = timeToX(playhead);
+      ctx.strokeStyle = palette.accent;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
   }
 
   // phantom scrollbar → viewport offset (review mode only; during recording
@@ -166,6 +178,7 @@
     const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
     const frac = max > 0 ? scrollerEl.scrollLeft / max : 0;
     firstVisibleTime = frac * maxFirst();
+
     draw();
   }
 
@@ -201,6 +214,16 @@
     spacerWidth = view * Math.max(1, lastTime / VISIBLE_SECONDS);
     await domTick(); // wait for the spacer to actually widen…
     scrollerEl.scrollLeft = scrollerEl.scrollWidth; // …then pin the thumb right (triggers onScroll → redraw)
+    draw();
+  }
+
+  export function setPlayhead(t: number | null) {
+    playhead = t;
+    if (playhead !== null) {
+      const cursorPosition = VISIBLE_SECONDS * CURSOR_POSITION_RATIO;
+      const desired = playhead > cursorPosition ? playhead - cursorPosition : 0;
+      firstVisibleTime = Math.min(desired, maxFirst()); // strop na konci
+    }
     draw();
   }
 </script>

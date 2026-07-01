@@ -14,6 +14,10 @@ export function freqToMidi(freq: number): number {
   return 69 + 12 * Math.log2(freq / 440);
 }
 
+export function midiToFreq(midi: number): number {
+  return 440 * 2 ** ((midi - 69) / 12);
+}
+
 export function midiToName(midi: number): string {
   const n = Math.round(midi);
   return NOTES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
