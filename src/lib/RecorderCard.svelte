@@ -1,18 +1,19 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { RecordHandler } from "./audio";
+  import { RecordHandler, type PitchCallback } from "./audio";
   import { freqToMidi, midiToName } from "./musicTheory";
   import PitchCanvas from "./PitchCanvas.svelte";
   import { Segmenter } from "./segmenter";
   import { buildChroma, detectKey, snapNotesToGrid } from "./detectKey";
   import { TonePlayer } from "./play";
-  import type { Note } from "./types";
+  import type { ChordSegment, KeyInfo, Note } from "./types";
+  import { ChordAnalyser } from "./analyseChords";
 
   // pitch-validity gating
   const MIN_FREQ = 70;
   const MAX_FREQ = 1100;
   const CONFIDENCE_CLARITY = 0.95; // clarity above this counts as a "confident" sample
-  const ACCEPTABLE_CLARITY = 0.75;
+  const ACCEPTABLE_CLARITY = 0.8;
 
   let recording = $state(false);
   let currentNote = $state("–"); // large live readout
@@ -22,11 +23,20 @@
   let playableNotes: Note[] = $state([]);
   let playbackRaf: number | null = null;
 
-  let lastValidTime = 0;
+  let {
+    onAnalysed,
+  }: {
+    onAnalysed?: (
+      notes: Note[],
+      keyInfo: KeyInfo,
+      segments: ChordSegment[],
+    ) => void;
+  } = $props();
 
   const handler = new RecordHandler();
   const segmenter = new Segmenter();
   const tonePlayer = new TonePlayer();
+  const chordAnalyser = new ChordAnalyser();
   let canvas: PitchCanvas; // child instance (bind:this) for push()/tick()/finish()
 
   function isValidPitch(freq: number): boolean {
@@ -39,7 +49,6 @@
     const midi = valid ? freqToMidi(freq) : NaN;
 
     if (valid) {
-      lastValidTime = time;
       canvas.push(time, midi, confident);
       segmenter.add(time, clarity, midi);
     }
@@ -56,12 +65,14 @@
       recording = true;
     } else {
       handler.stopRecording();
-      segmenter.finish(lastValidTime);
+      segmenter.finish();
       const snapped = snapNotesToGrid(segmenter.notes);
       playableNotes = snapped;
       const keyInfo = detectKey(buildChroma(snapped));
       canvas.finish(snapped);
-      console.log(keyInfo); // TODO: surface key estimate in the UI
+      chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
+      const segments = chordAnalyser.analyseChords(snapped);
+      onAnalysed?.(snapped, keyInfo, segments);
       recording = false;
       currentConfident = false;
     }
@@ -77,7 +88,6 @@
     currentNote = "–";
     currentConfident = false;
     hasSamples = false;
-    lastValidTime = 0;
     segmenter.reset();
     canvas.clear();
   }

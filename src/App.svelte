@@ -1,31 +1,28 @@
 <script lang="ts">
-  // App = "dirigent": jen poskládá komponenty dohromady.
   import Masthead from "./lib/Masthead.svelte";
   import RecorderCard from "./lib/RecorderCard.svelte";
   import AnalysisCard from "./lib/AnalysisCard.svelte";
-  import { sampleTones } from "./lib/sampleData";
+  import type { Note, ChordSegment, KeyInfo } from "./lib/types";
+  let notes: Note[] = $state([]);
+  let keyInfo: KeyInfo | null = $state(null);
+  let segments: ChordSegment[] = $state([]);
 </script>
 
 <div class="wrap">
   <Masthead />
-  <RecorderCard />
-
-  <footer class="foot">
-    Nahrávka nikam neodchází · žádný účet, žádný server, žádné ukládání
-  </footer>
+  <RecorderCard
+    onAnalysed={(n: Note[], k: KeyInfo, s: ChordSegment[]) => {
+      notes = n;
+      keyInfo = k;
+      segments = s;
+    }}
+  />
+  <AnalysisCard {notes} {keyInfo} {segments} />
 </div>
 
 <style>
   .wrap {
     width: 100%;
     max-width: var(--maxw);
-  }
-
-  .foot {
-    margin-top: 36px;
-    text-align: center;
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--muted);
   }
 </style>

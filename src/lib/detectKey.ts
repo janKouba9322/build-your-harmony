@@ -1,5 +1,5 @@
 import { KK_MAJOR, KK_MINOR } from "./constans";
-import type { Note } from "./types";
+import type { KeyInfo, KeyMode, Note } from "./types";
 
 // --- public pipeline: straighten → buildChroma → detectKey ---
 
@@ -27,14 +27,14 @@ export function buildChroma(snappedNotes: Note[]): number[] {
 
 // Correlate the chroma against all 24 rotated Krumhansl-Kessler profiles,
 // pick the best. Confidence is the (rough) margin over the runner-up.
-export function detectKey(chroma: number[]) {
-  let best = { score: -2, tonic: 0, mode: "dur" as "dur" | "moll" };
+export function detectKey(chroma: number[]): KeyInfo {
+  let best = { score: -2, tonic: 0, mode: "major" as KeyMode };
   let second = -2;
 
   for (let tonic = 0; tonic < 12; tonic++) {
     for (const [mode, prof] of [
-      ["dur", KK_MAJOR],
-      ["moll", KK_MINOR],
+      ["major", KK_MAJOR],
+      ["minor", KK_MINOR],
     ] as const) {
       const rotated = prof.map((_, i) => prof[(i - tonic + 12) % 12]);
       const score = correlate(chroma, rotated);

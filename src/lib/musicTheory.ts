@@ -22,3 +22,9 @@ export function midiToName(midi: number): string {
   const n = Math.round(midi);
   return NOTES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
 }
+
+// pitch class (0–11) → note name, no octave (Czech H for B natural)
+
+export function pitchClassName(pc: number): string {
+  return NOTES[((pc % 12) + 12) % 12];
+}
