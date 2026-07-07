@@ -2,9 +2,15 @@ import { PitchTracker } from "./pitch";
 
 async function getMicAccess(): Promise<MediaStream | null> {
   try {
-    return await navigator.mediaDevices.getUserMedia({ audio: true });
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: false,
+      },
+    });
   } catch (err) {
-    console.error("Není povolen mikrofon:", err);
+    console.error("Mic not allowed:", err);
     return null;
   }
 }

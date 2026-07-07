@@ -1,20 +1,14 @@
 <script lang="ts">
-  // Read-only analysis view: key, notes overview, and chord progression.
+  // Read-only analysis view: key, overview stats, chord progression, notes.
   // Pure display — App feeds it the results RecorderCard produced.
-  import type { KeyMode, Note } from "./types";
-  import { pitchClassName, midiToName } from "./musicTheory";
-
-  type ChordCandidate = {
-    degree: number;
-    pitchClasses: number[];
-    score: number;
-  };
-  type Segment = {
-    startTime: number;
-    endTime: number;
-    candidates: ChordCandidate[];
-  };
-  type KeyInfo = { tonic: number; mode: "major" | "minor"; confidence: number };
+  import type { ChordSegment, KeyInfo, Note } from "./types";
+  import {
+    midiToName,
+    keyLabel,
+    degreeNumeral,
+    chordLabel,
+    chordUncertain,
+  } from "./musicTheory";
 
   let {
     notes = [],
@@ -23,87 +17,62 @@
   }: {
     notes: Note[];
     keyInfo: KeyInfo | null;
-    segments: Segment[];
+    segments: ChordSegment[];
   } = $props();
 
-  // roman numerals per scale degree, case by chord quality within the key
-  const MAJOR_NUMERALS = ["I", "ii", "iii", "IV", "V", "vi", "vii°"];
-  const MINOR_NUMERALS = ["i", "ii°", "III", "iv", "v", "VI", "VII"];
-
-  function numeral(degree: number, mode: KeyMode): string {
-    const table = mode === "major" ? MAJOR_NUMERALS : MINOR_NUMERALS;
-    return table[degree - 1] ?? "?";
+  // confidence 0–1 → level key (safe for CSS classes) + Czech label.
+  // Levels map to the voice colors: certain=teal, maybe=amber, unsure=coral.
+  type ConfLevel = "high" | "mid" | "low";
+  function confidenceLevel(c: number): ConfLevel {
+    if (c >= 0.66) return "high";
+    if (c >= 0.33) return "mid";
+    return "low";
   }
+  const CONF_LABEL: Record<ConfLevel, string> = {
+    high: "likely",
+    mid: "maybe",
+    low: "unsure",
+  };
 
-  // confidence 0–1 → human phrase (honest about uncertainty)
-  function confidenceLabel(c: number): string {
-    if (c >= 0.66) return "spíš jistě";
-    if (c >= 0.33) return "možná";
-    return "nejistě";
-  }
-
-  // key name from tonic pitch class + mode
-  function keyName(k: KeyInfo): string {
-    const mode = k.mode === "major" ? "dur" : "moll";
-    return `${pitchClassName(k.tonic)} ${mode}`;
-  }
-
-  // chord name = root pitch-class name + quality suffix (rough, from the triad)
-  function chordName(cand: ChordCandidate, mode: KeyMode): string {
-    const root = pitchClassName(cand.pitchClasses[0]);
-    const num = numeral(cand.degree, mode);
-    // quality read from the numeral casing
-    const isMinor = num === num.toLowerCase() && !num.includes("°");
-    const isDim = num.includes("°");
-    const suffix = isDim ? "dim" : isMinor ? "mi" : "";
-    return `${root}${suffix ? " " + suffix : ""}`;
-  }
-
-  // seconds → "1.2 s"
   function secs(t: number): string {
     return `${t.toFixed(1)} s`;
   }
 
   // derived summaries
   const hasResults = $derived(notes.length > 0 || segments.length > 0);
-  const noteCount = $derived(notes.length);
   const totalDuration = $derived(
     notes.length > 0 ? notes[notes.length - 1].endTime : 0,
   );
-  // pitch range across the take
   const rangeText = $derived.by(() => {
     if (notes.length === 0) return "–";
     const midis = notes.map((n) => Math.round(n.avgMidifloat));
-    const lo = Math.min(...midis);
-    const hi = Math.max(...midis);
-    return `${midiToName(lo)} – ${midiToName(hi)}`;
+    return `${midiToName(Math.min(...midis))}–${midiToName(Math.max(...midis))}`;
   });
-
-  // is an alternative worth showing? (close second in the ranking)
-  function altWorthShowing(seg: Segment): boolean {
-    const c = seg.candidates;
-    if (c.length < 2) return false;
-    return c[0].score - c[1].score < 0.15 && c[1].score > 0.4;
-  }
 </script>
 
 <section class="card" aria-label="Analýza melodie">
   {#if !hasResults}
-    <p class="empty">Zatím nic k analýze — nahraj melodii a dej „Hotovo“.</p>
+    <div class="empty">
+      <span class="empty-mark" aria-hidden="true">♪</span>
+      <p class="empty-title">No analysis yet</p>
+      <p class="empty-sub">
+        Record the melody and click "Done — analyze." The key, suggested chords,
+        and recognized notes will then appear here.
+      </p>
+    </div>
   {:else}
     <!-- KEY -->
     {#if keyInfo}
+      {@const level = confidenceLevel(keyInfo.confidence)}
       <div class="block">
-        <div class="block-head">Tónina</div>
+        <div class="block-head">Key</div>
         <div class="key-row">
-          <span class="key-name">{keyName(keyInfo)}</span>
-          <span class="conf conf--{confidenceLabel(keyInfo.confidence)}">
-            {confidenceLabel(keyInfo.confidence)}
-          </span>
+          <span class="key-name">{keyLabel(keyInfo.tonic, keyInfo.mode)}</span>
+          <span class="conf conf--{level}">{CONF_LABEL[level]}</span>
         </div>
         <div class="conf-bar" aria-hidden="true">
           <div
-            class="conf-fill"
+            class="conf-fill conf-fill--{level}"
             style:width="{Math.round(keyInfo.confidence * 100)}%"
           ></div>
         </div>
@@ -112,23 +81,23 @@
 
     <!-- OVERVIEW -->
     <div class="block">
-      <div class="block-head">Přehled</div>
+      <div class="block-head">OVERVIEW</div>
       <div class="stats">
         <div class="stat">
-          <span class="stat-val">{noteCount}</span>
-          <span class="stat-key">tónů</span>
+          <span class="stat-val">{notes.length}</span>
+          <span class="stat-key">notes</span>
         </div>
         <div class="stat">
           <span class="stat-val">{rangeText}</span>
-          <span class="stat-key">rozsah</span>
+          <span class="stat-key">range</span>
         </div>
         <div class="stat">
           <span class="stat-val">{secs(totalDuration)}</span>
-          <span class="stat-key">délka</span>
+          <span class="stat-key">length</span>
         </div>
         <div class="stat">
           <span class="stat-val">{segments.length}</span>
-          <span class="stat-key">úseků</span>
+          <span class="stat-key">chords</span>
         </div>
       </div>
     </div>
@@ -136,40 +105,53 @@
     <!-- CHORD PROGRESSION -->
     {#if segments.length > 0 && keyInfo}
       <div class="block">
-        <div class="block-head">Akordy</div>
+        <div class="block-head">Chord suggestion</div>
         <div class="chords">
-          {#each segments as seg}
+          {#each segments as seg, i}
             {@const best = seg.candidates[0]}
-            <div class="chord">
-              <div class="chord-num">{numeral(best.degree, keyInfo.mode)}</div>
-              <div class="chord-name">{chordName(best, keyInfo.mode)}</div>
+            {@const uncertain = chordUncertain(seg)}
+            <div class="chord" class:chord--uncertain={uncertain}>
+              <div class="chord-num">
+                {chordLabel(best, keyInfo.mode)}{#if uncertain}<span class="q"
+                    >?</span
+                  >{/if}
+              </div>
+              <div class="chord-name">
+                {degreeNumeral(best.degree, keyInfo.mode)}
+              </div>
               <div class="chord-time">{secs(seg.startTime)}</div>
-              {#if altWorthShowing(seg)}
-                {@const alt = seg.candidates[1]}
+              {#if uncertain && seg.candidates[1]}
                 <div class="chord-alt">
-                  nebo {chordName(alt, keyInfo.mode)}
+                  or {chordLabel(seg.candidates[1], keyInfo.mode)} ({degreeNumeral(
+                    seg.candidates[1].degree,
+                    keyInfo.mode,
+                  )})
                 </div>
               {/if}
             </div>
+            {#if i < segments.length - 1}
+              <span class="arrow" aria-hidden="true">→</span>
+            {/if}
           {/each}
         </div>
-        <p class="chords-hint">
-          Akordy jsou odhad — kde je „nebo“, sedělo víc možností podobně.
+        <p class="block-hint">
+          The chords are an estimate—a question mark and "or" indicate that
+          multiple options fit equally well.
         </p>
       </div>
     {/if}
 
     <!-- NOTE LIST -->
     <div class="block">
-      <div class="block-head">Tóny</div>
+      <div class="block-head">Recognized tones</div>
       <div class="note-list">
         {#each notes as note}
           <span
             class="note-chip"
-            class:note-chip--faint={note.avgClarity < 0.8}
+            style:opacity={0.45 + 0.55 * note.avgClarity}
             title="{secs(note.startTime)} · {note.duration.toFixed(
               2,
-            )} s · jistota {Math.round(note.avgClarity * 100)}%"
+            )} s · certainty {Math.round(note.avgClarity * 100)}%"
           >
             {midiToName(Math.round(note.avgMidifloat))}
           </span>
@@ -180,24 +162,65 @@
 </section>
 
 <style>
+  /* card with a teal hairline — analysis is the "certainty" card */
   .card {
+    position: relative;
+    overflow: hidden;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-card);
-    padding: clamp(18px, 4vw, 28px);
+    padding: clamp(18px, 4vw, 30px);
     margin-bottom: 20px;
+    animation: rise 0.55s ease 0.16s both;
+  }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-3), transparent 65%);
+    opacity: 0.7;
   }
 
+  /* --- empty state --- */
   .empty {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    color: var(--muted);
     text-align: center;
-    margin: 8px 0;
+    padding: clamp(10px, 3vw, 22px) 8px;
+  }
+  .empty-mark {
+    display: block;
+    font-family: var(--font-display);
+    font-size: 40px;
+    color: var(--uncertain);
+    margin-bottom: 8px;
+  }
+  .empty-title {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 18px;
+  }
+  .empty-sub {
+    margin: 8px auto 0;
+    max-width: 44ch;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--muted);
   }
 
+  /* --- blocks with a staggered entrance --- */
   .block {
-    margin-bottom: 26px;
+    margin-bottom: 28px;
+    animation: rise 0.45s ease both;
+  }
+  .block:nth-of-type(2) {
+    animation-delay: 0.07s;
+  }
+  .block:nth-of-type(3) {
+    animation-delay: 0.14s;
+  }
+  .block:nth-of-type(4) {
+    animation-delay: 0.21s;
   }
   .block:last-child {
     margin-bottom: 0;
@@ -205,10 +228,17 @@
   .block-head {
     font-family: var(--font-mono);
     font-size: 11px;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--muted);
     margin-bottom: 12px;
+  }
+  .block-hint {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 12px;
+    line-height: 1.6;
   }
 
   /* --- key --- */
@@ -221,51 +251,73 @@
   .key-name {
     font-family: var(--font-display);
     font-weight: 800;
-    font-size: clamp(32px, 8vw, 44px);
+    font-size: clamp(34px, 8vw, 46px);
     line-height: 1;
     color: var(--accent);
     letter-spacing: -0.02em;
   }
   .conf {
     font-family: var(--font-mono);
-    font-size: 13px;
-    padding: 3px 10px;
+    font-size: 12.5px;
+    padding: 4px 12px;
     border-radius: 999px;
     border: 1px solid var(--line);
-    color: var(--muted);
   }
-  .conf--spíš.jistě,
-  .conf--spíš {
+  .conf--high {
     color: var(--accent-3);
+    background: color-mix(in srgb, var(--accent-3) 12%, transparent);
+    border-color: color-mix(in srgb, var(--accent-3) 35%, transparent);
+  }
+  .conf--mid {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  .conf--low {
+    color: var(--accent-2);
+    background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent-2) 30%, transparent);
   }
   .conf-bar {
-    margin-top: 12px;
-    height: 4px;
-    background: var(--raised, rgba(255, 255, 255, 0.06));
-    border-radius: 2px;
+    margin-top: 14px;
+    height: 5px;
+    background: var(--raised);
+    border-radius: 3px;
     overflow: hidden;
   }
   .conf-fill {
     height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .conf-fill--high {
+    background: var(--accent-3);
+  }
+  .conf-fill--mid {
     background: var(--accent);
-    border-radius: 2px;
-    transition: width 0.3s ease;
+  }
+  .conf-fill--low {
+    background: var(--accent-2);
   }
 
-  /* --- overview stats --- */
+  /* --- overview stats: raised metric tiles --- */
   .stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
   }
   .stat {
     display: flex;
     flex-direction: column;
     gap: 4px;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: var(--r-ctl);
+    padding: 12px 14px;
   }
   .stat-val {
     font-family: var(--font-mono);
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text);
   }
@@ -275,18 +327,30 @@
     color: var(--muted);
   }
 
-  /* --- chords --- */
+  /* --- chord progression flow --- */
   .chords {
     display: flex;
-    gap: 10px;
+    align-items: center;
+    gap: 8px;
     flex-wrap: wrap;
   }
   .chord {
-    background: var(--raised, rgba(255, 255, 255, 0.04));
+    background: var(--raised);
     border: 1px solid var(--line);
-    border-radius: 12px;
+    border-radius: var(--r-ctl);
     padding: 12px 16px;
-    min-width: 72px;
+    min-width: 76px;
+    transition:
+      transform 0.15s ease,
+      border-color 0.2s ease;
+    text-align: center;
+  }
+  .chord:hover {
+    transform: translateY(-2px);
+    border-color: var(--line-strong);
+  }
+  .chord--uncertain {
+    border-style: dashed;
   }
   .chord-num {
     font-family: var(--font-display);
@@ -295,11 +359,19 @@
     color: var(--accent);
     line-height: 1;
   }
+  .chord--uncertain .chord-num {
+    opacity: 0.7;
+  }
+  .q {
+    font-size: 14px;
+    color: var(--muted);
+    margin-left: 3px;
+  }
   .chord-name {
     font-family: var(--font-mono);
-    font-size: 14px;
+    font-size: 13.5px;
     color: var(--text);
-    margin-top: 4px;
+    margin-top: 5px;
   }
   .chord-time {
     font-family: var(--font-mono);
@@ -311,17 +383,15 @@
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--accent-2);
-    margin-top: 6px;
+    margin-top: 5px;
   }
-  .chords-hint {
-    font-family: var(--font-mono);
-    font-size: 11.5px;
-    color: var(--muted);
-    margin-top: 12px;
-    line-height: 1.5;
+  .arrow {
+    color: var(--uncertain);
+    font-size: 15px;
+    flex: none;
   }
 
-  /* --- note list --- */
+  /* --- note chips --- */
   .note-list {
     display: flex;
     gap: 6px;
@@ -330,15 +400,11 @@
   .note-chip {
     font-family: var(--font-mono);
     font-size: 13px;
-    padding: 4px 9px;
+    padding: 5px 10px;
     border-radius: 8px;
-    background: var(--raised, rgba(255, 255, 255, 0.04));
+    background: var(--raised);
     border: 1px solid var(--line);
     color: var(--text);
     cursor: default;
-  }
-  .note-chip--faint {
-    color: var(--muted);
-    opacity: 0.7;
   }
 </style>

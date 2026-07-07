@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { RecordHandler, type PitchCallback } from "./audio";
+  import { RecordHandler } from "./audio";
   import { freqToMidi, midiToName } from "./musicTheory";
   import PitchCanvas from "./PitchCanvas.svelte";
   import { Segmenter } from "./segmenter";
@@ -13,7 +13,7 @@
   const MIN_FREQ = 70;
   const MAX_FREQ = 1100;
   const CONFIDENCE_CLARITY = 0.95; // clarity above this counts as a "confident" sample
-  const ACCEPTABLE_CLARITY = 0.8;
+  const ACCEPTABLE_CLARITY = 0.7;
 
   let recording = $state(false);
   let currentNote = $state("–"); // large live readout
@@ -21,6 +21,7 @@
   let hasSamples = $state(false); // enables the "start over" button
 
   let playableNotes: Note[] = $state([]);
+  let playing = $state(false);
   let playbackRaf: number | null = null;
 
   let {
@@ -28,7 +29,7 @@
   }: {
     onAnalysed?: (
       notes: Note[],
-      keyInfo: KeyInfo,
+      keyInfo: KeyInfo | null,
       segments: ChordSegment[],
     ) => void;
   } = $props();
@@ -61,6 +62,9 @@
 
   function toggle() {
     if (!recording) {
+      if (playableNotes.length !== 0) {
+        reset();
+      }
       handler.startRecording(onPitch);
       recording = true;
     } else {
@@ -69,9 +73,10 @@
       const snapped = snapNotesToGrid(segmenter.notes);
       playableNotes = snapped;
       const keyInfo = detectKey(buildChroma(snapped));
-      canvas.finish(snapped);
+
       chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
       const segments = chordAnalyser.analyseChords(snapped);
+      canvas.finish(snapped, segments, keyInfo);
       onAnalysed?.(snapped, keyInfo, segments);
       recording = false;
       currentConfident = false;
@@ -82,23 +87,28 @@
     tonePlayer.stop();
     if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
     playbackRaf = null;
+    playing = false;
     canvas.setPlayhead(null);
     handler.stopRecording();
     recording = false;
     currentNote = "–";
     currentConfident = false;
     hasSamples = false;
+    playableNotes = []; // hide the play button again
     segmenter.reset();
     canvas.clear();
+    onAnalysed?.([], null, []); // clear stale analysis in the parent too
   }
 
   async function startPlayback() {
-    await tonePlayer.play(playableNotes); // straightened/snapped notes
+    await tonePlayer.play(playableNotes); // grid-snapped notes
+    playing = true;
     const loop = () => {
       const t = tonePlayer.playbackTime();
       if (t === null) {
         canvas.setPlayhead(null); // done → cursor gone
         playbackRaf = null;
+        playing = false;
         return;
       }
       canvas.setPlayhead(t);
@@ -112,14 +122,26 @@
 
 <section class="card" aria-label="Nahrávání melodie">
   <div class="live-row">
-    <div class="note-readout" class:dim={!currentConfident}>{currentNote}</div>
+    <div
+      class="note-readout"
+      class:dim={!currentConfident}
+      class:glow={currentConfident}
+    >
+      {currentNote}
+    </div>
     <div class="live-meta">
       <div class="status">
-        {recording ? "poslouchám…" : "mikrofon vypnutý"}
+        {#if recording}
+          <span class="rec-dot" aria-hidden="true"></span>
+          <span class="rec-label">REC</span>
+          listening…
+        {:else}
+          mic off
+        {/if}
       </div>
       <div class="legend">
-        <span><i class="swatch swatch--on"></i>jistý tón</span>
-        <span><i class="swatch swatch--off"></i>nejistý</span>
+        <span><i class="swatch swatch--on"></i>confident</span>
+        <span><i class="swatch swatch--off"></i>uncertain</span>
       </div>
     </div>
   </div>
@@ -134,65 +156,106 @@
       class:is-recording={recording}
       onclick={toggle}
     >
-      {recording ? "Hotovo — zpracovat" : "Zapnout mikrofon"}
+      {recording ? "Done — analyze" : "Start recording"}
     </button>
     <button
       class="btn btn--ghost"
       disabled={!recording && !hasSamples}
       onclick={reset}
     >
-      Začít znovu
+      Reset
     </button>
     {#if !recording && playableNotes.length > 0}
-      <button class="btn btn--ghost" onclick={startPlayback}>▶ Přehrát</button>
+      <button class="btn btn--ghost btn--play" onclick={startPlayback}>
+        <span class="play-tri" aria-hidden="true"></span>
+        {playing ? "Playing…" : "Play"}
+      </button>
     {/if}
   </div>
 
   <p class="hint">
-    Zpívej jeden tón po druhém, blízko mikrofonu. Nejde o to zazpívat „čistě“ —
-    stačí, když sedí vzdálenosti mezi tóny.
+    Sing one note after another, close to the microphone. It’s not about singing
+    “cleanly”— it’s enough if the intervals between the notes are accurate.
   </p>
 </section>
 
 <style>
-  /* card container */
+  /* card container with a warm hairline on top */
   .card {
+    position: relative;
+    overflow: hidden;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: var(--r-card);
-    padding: clamp(18px, 4vw, 28px);
+    padding: clamp(18px, 4vw, 30px);
     margin-bottom: 20px;
+    animation: rise 0.55s ease 0.08s both;
   }
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent 65%);
+    opacity: 0.7;
+  }
+
   /* top row: big readout + status/legend */
   .live-row {
     display: flex;
     align-items: center;
-    gap: clamp(16px, 4vw, 24px);
+    gap: clamp(16px, 4vw, 26px);
     flex-wrap: wrap;
   }
+
   /* large live note readout */
   .note-readout {
     font-family: var(--font-display);
     font-weight: 800;
-    font-size: clamp(56px, 14vw, 76px);
+    font-size: clamp(52px, 13vw, 76px);
     line-height: 1;
     letter-spacing: -0.03em;
-    min-width: 120px;
-    transition: color 0.12s ease;
+    width: 118px;
+    transition:
+      color 0.12s ease,
+      text-shadow 0.25s ease;
   }
   .note-readout.dim {
     color: var(--uncertain);
+    text-shadow: none;
   }
+  .note-readout.glow {
+    color: var(--text);
+    text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
   .live-meta {
     display: flex;
     flex-direction: column;
     gap: 10px;
   }
   .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--font-mono);
     font-size: 13px;
     color: var(--muted);
   }
+  .rec-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--accent-2);
+    animation: pulse-ring 1.6s ease-out infinite;
+  }
+  .rec-label {
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--accent-2);
+    animation: blink 1.6s steps(1) infinite;
+  }
+
   /* confident / uncertain legend */
   .legend {
     display: flex;
@@ -217,10 +280,12 @@
   .swatch--off {
     background: var(--uncertain);
   }
+
   /* spacing wrapper around the canvas component */
   .canvas-wrap {
     margin-top: 22px;
   }
+
   /* control buttons */
   .controls {
     display: flex;
@@ -233,43 +298,74 @@
     font-weight: 600;
     font-size: 15px;
     border: none;
-    border-radius: 12px;
+    border-radius: var(--r-ctl);
     padding: 13px 22px;
     cursor: pointer;
     transition:
-      transform 0.08s ease,
-      background 0.15s ease,
+      transform 0.12s ease,
+      background 0.18s ease,
+      box-shadow 0.25s ease,
       opacity 0.15s ease;
   }
-  .btn:active {
+  .btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  .btn:active:not(:disabled) {
     transform: translateY(1px);
   }
-  .btn:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
   .btn:disabled {
-    opacity: 0.4;
+    opacity: 0.35;
     cursor: not-allowed;
   }
+
   .btn--primary {
     background: var(--accent);
-    color: #241a00;
+    color: var(--accent-ink);
+  }
+  .btn--primary:hover:not(:disabled) {
+    box-shadow: 0 6px 24px -6px color-mix(in srgb, var(--accent) 55%, transparent);
   }
   .btn--primary.is-recording {
     background: var(--accent-2);
-    color: #2a0d0a;
+    color: var(--accent-2-ink);
+    animation: pulse-ring 2s ease-out infinite;
   }
+
   .btn--ghost {
     background: var(--raised);
     color: var(--text);
+    border: 1px solid var(--line);
   }
+  .btn--ghost:hover:not(:disabled) {
+    border-color: var(--line-strong);
+  }
+
+  .btn--play {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .play-tri {
+    width: 0;
+    height: 0;
+    border-style: solid;
+    border-width: 6px 0 6px 10px;
+    border-color: transparent transparent transparent var(--accent);
+  }
+
   /* helper hint text */
   .hint {
     font-family: var(--font-mono);
     font-size: 12.5px;
     color: var(--muted);
     margin-top: 18px;
-    line-height: 1.55;
+    line-height: 1.6;
+  }
+
+  /* mobile: buttons stretch full width for easy thumbs */
+  @media (max-width: 560px) {
+    .controls .btn {
+      flex: 1 1 auto;
+    }
   }
 </style>

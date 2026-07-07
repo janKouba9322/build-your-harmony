@@ -1,8 +1,8 @@
 import type { Note } from "./types";
 
-const MIDI_THRESHOLD = 0.85; // how close a pitch must be (semitones) to count as the same note
+const MIDI_THRESHOLD = 1; // how close a pitch must be (semitones) to count as the same note
 const ANCHOR_LOCK_FRAME_LENGTH = 15; // after this many frames the anchor pitch freezes (resists slow drift)
-const MIN_NOTE_DURATION = 0.06; // notes shorter than this (seconds) are discarded as blips
+const MIN_NOTE_DURATION = 0.08; // notes shorter than this (seconds) are discarded as blips
 const MAX_GAP_DURATION = 0.1; // a return within this gap (seconds) re-joins the previous note
 const MIN_NOTE_FRAME_LENGTH = 8; // a real note needs at least this many actual samples
 
@@ -44,6 +44,9 @@ export class Segmenter {
     } else if (fitsPrev) {
       // pull the previous note back out and keep extending it across the gap
       this.currentNote = this.notes.pop()!;
+      this.totalWeight =
+        this.currentNote.avgClarity * this.currentNote.frameLength;
+      this.weightedSum = this.currentNote.avgMidifloat * this.totalWeight;
       this.extendNote(time, clarity, midifloat);
     } else if (isEmpty) {
       this.startNote(time, clarity, midifloat);
