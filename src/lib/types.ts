@@ -8,7 +8,7 @@ export interface Tone {
 
 export type Note = {
   duration: number; // seconds, endTime - startTime
-  frameLength: number; // number of samples that landed in this note
+  sampleCount: number; // number of samples that landed in this note
   avgClarity: number;
   avgMidifloat: number;
   anchorMidifloat: number;
@@ -41,3 +41,9 @@ export type KeyInfo = {
 };
 
 export type KeyMode = "major" | "minor";
+
+export type Sample = {
+  midi: number;
+  time: number;
+  clarity: number;
+};

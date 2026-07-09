@@ -6,16 +6,19 @@
   import { Segmenter } from "./segmenter";
   import { buildChroma, detectKey, snapNotesToGrid } from "./detectKey";
   import { TonePlayer } from "./play";
-  import type { ChordSegment, KeyInfo, Note } from "./types";
+  import type { ChordSegment, KeyInfo, Note, Sample } from "./types";
   import { ChordAnalyser } from "./analyseChords";
+  import { PitchVisualCleaner } from "./pitchVisualCleaner";
+  import { ViterbiCleaner } from "./viterbiCleaner";
+  import { CONFIDENCE_CLARITY } from "./constans";
 
   // pitch-validity gating
   const MIN_FREQ = 70;
   const MAX_FREQ = 1100;
-  const CONFIDENCE_CLARITY = 0.95; // clarity above this counts as a "confident" sample
   const ACCEPTABLE_CLARITY = 0.7;
 
   let recording = $state(false);
+  let samples: Sample[] = [];
   let currentNote = $state("–"); // large live readout
   let currentConfident = $state(false);
   let hasSamples = $state(false); // enables the "start over" button
@@ -38,6 +41,8 @@
   const segmenter = new Segmenter();
   const tonePlayer = new TonePlayer();
   const chordAnalyser = new ChordAnalyser();
+  const pitchCleaner = new PitchVisualCleaner();
+  const viterbiCleaner = new ViterbiCleaner();
   let canvas: PitchCanvas; // child instance (bind:this) for push()/tick()/finish()
 
   function isValidPitch(freq: number): boolean {
@@ -48,16 +53,16 @@
     const valid = isValidPitch(freq) && clarity > ACCEPTABLE_CLARITY;
     const confident = valid && clarity > CONFIDENCE_CLARITY;
     const midi = valid ? freqToMidi(freq) : NaN;
-
+    samples.push({ midi: midi, time: time, clarity: clarity });
     if (valid) {
-      canvas.push(time, midi, confident);
-      segmenter.add(time, clarity, midi);
+      const cleanedMidi = pitchCleaner.feed(midi, time);
+      canvas.push(time, cleanedMidi, confident);
+      currentConfident = confident;
+      if (confident) currentNote = midiToName(midi);
     }
+
     canvas.tick(time); // advance the viewport every frame, even on silence
     hasSamples = true;
-
-    currentConfident = confident;
-    if (confident) currentNote = midiToName(midi);
   }
 
   function toggle() {
@@ -65,22 +70,32 @@
       if (playableNotes.length !== 0) {
         reset();
       }
-      handler.startRecording(onPitch);
-      recording = true;
+      start();
     } else {
-      handler.stopRecording();
-      segmenter.finish();
-      const snapped = snapNotesToGrid(segmenter.notes);
-      playableNotes = snapped;
-      const keyInfo = detectKey(buildChroma(snapped));
-
-      chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
-      const segments = chordAnalyser.analyseChords(snapped);
-      canvas.finish(snapped, segments, keyInfo);
-      onAnalysed?.(snapped, keyInfo, segments);
-      recording = false;
-      currentConfident = false;
+      finish();
     }
+  }
+
+  function start() {
+    handler.startRecording(onPitch);
+    recording = true;
+  }
+
+  function finish() {
+    handler.stopRecording();
+    console.log(samples);
+    const cleanedSamples = viterbiCleaner.viterbi(samples);
+    const notes = segmenter.analyse(cleanedSamples);
+    const snapped = snapNotesToGrid(notes);
+    playableNotes = snapped;
+    const keyInfo = detectKey(buildChroma(snapped));
+
+    chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
+    const segments = chordAnalyser.analyseChords(snapped);
+    canvas.finish(snapped, segments, cleanedSamples, keyInfo);
+    onAnalysed?.(snapped, keyInfo, segments);
+    recording = false;
+    currentConfident = false;
   }
 
   function reset() {
@@ -95,7 +110,7 @@
     currentConfident = false;
     hasSamples = false;
     playableNotes = []; // hide the play button again
-    segmenter.reset();
+    samples = [];
     canvas.clear();
     onAnalysed?.([], null, []); // clear stale analysis in the parent too
   }

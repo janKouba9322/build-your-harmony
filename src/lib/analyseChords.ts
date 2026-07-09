@@ -9,6 +9,7 @@ const MINOR = [0, 2, 3, 5, 7, 8, 10]; // natural minor
 // otherwise it's treated as ornamentation and folded back in
 const PENDING_WEIGHT_MIN = 0.2;
 const PENDING_COHERENCE_MIN = 0.3;
+const MIN_CHORD_DURATION = 0.5;
 
 export class ChordAnalyser {
   private tonic: number | null = null;
@@ -47,12 +48,15 @@ export class ChordAnalyser {
         pending.push(note);
         const pendingWeight = totalWeight(pending);
         const otherChord = this.bestChord(pending);
+        const startTime = current[0].startTime;
+        const endTime = current[current.length - 1].endTime;
 
         const isRealChange =
           pendingWeight >= PENDING_WEIGHT_MIN &&
           scoreChord(otherChord.pitchClasses, pending) >=
             PENDING_COHERENCE_MIN &&
-          otherChord.degree !== lead.degree;
+          otherChord.degree !== lead.degree &&
+          endTime - startTime > MIN_CHORD_DURATION;
 
         if (isRealChange) {
           // pending coheres into a different chord → the harmony changed here
@@ -67,6 +71,7 @@ export class ChordAnalyser {
     // whatever is still pending belonged to the final segment
     current.push(...pending);
     segments.push(this.closeSegment(current));
+
     return segments;
   }
 
@@ -91,7 +96,6 @@ export class ChordAnalyser {
       pitchClasses: chord.pitchClasses,
       score: scoreChord(chord.pitchClasses, notes),
     })).sort((a, b) => b.score - a.score);
-
     return {
       startTime: notes[0].startTime,
       endTime: notes[notes.length - 1].endTime,

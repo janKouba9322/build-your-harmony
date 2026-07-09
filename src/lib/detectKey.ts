@@ -1,4 +1,4 @@
-import { KK_MAJOR, KK_MINOR } from "./constans";
+import { T_MAJOR, T_MINOR } from "./constans";
 import type { KeyInfo, KeyMode, Note } from "./types";
 
 // --- public pipeline: straighten → buildChroma → detectKey ---
@@ -33,8 +33,8 @@ export function detectKey(chroma: number[]): KeyInfo {
 
   for (let tonic = 0; tonic < 12; tonic++) {
     for (const [mode, prof] of [
-      ["major", KK_MAJOR],
-      ["minor", KK_MINOR],
+      ["major", T_MAJOR],
+      ["minor", T_MINOR],
     ] as const) {
       const rotated = prof.map((_, i) => prof[(i - tonic + 12) % 12]);
       const score = correlate(chroma, rotated);

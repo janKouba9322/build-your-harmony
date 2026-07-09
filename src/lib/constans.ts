@@ -18,3 +18,12 @@ export const KK_MAJOR = [
 export const KK_MINOR = [
   6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
 ];
+
+export const T_MAJOR = [
+  0.748, 0.06, 0.488, 0.082, 0.67, 0.46, 0.096, 0.715, 0.104, 0.366, 0.057, 0.4,
+];
+export const T_MINOR = [
+  0.712, 0.084, 0.474, 0.618, 0.049, 0.46, 0.105, 0.747, 0.404, 0.067, 0.133,
+  0.33,
+];
+export const CONFIDENCE_CLARITY = 0.95; // clarity above this counts as a "confident" sample
