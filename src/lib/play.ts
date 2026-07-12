@@ -32,4 +32,9 @@ export class TonePlayer {
   playbackTime(): number | null {
     return this.transport.state === "started" ? this.transport.seconds : null;
   }
+  async previewNote(midi: number, duration = 0.15) {
+    await Tone.start();
+    const freq = midiToFreq(midi);
+    this.synth.triggerAttackRelease(freq, duration);
+  }
 }

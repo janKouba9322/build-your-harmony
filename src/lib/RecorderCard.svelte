@@ -53,15 +53,16 @@
     const valid = isValidPitch(freq) && clarity > ACCEPTABLE_CLARITY;
     const confident = valid && clarity > CONFIDENCE_CLARITY;
     const midi = valid ? freqToMidi(freq) : NaN;
-    samples.push({ midi: midi, time: time, clarity: clarity });
+    samples.push({ midi, time, clarity });
+
     if (valid) {
       const cleanedMidi = pitchCleaner.feed(midi, time);
       canvas.push(time, cleanedMidi, confident);
       currentConfident = confident;
       if (confident) currentNote = midiToName(midi);
     }
+    canvas.tick(time);
 
-    canvas.tick(time); // advance the viewport every frame, even on silence
     hasSamples = true;
   }
 
@@ -83,7 +84,6 @@
 
   function finish() {
     handler.stopRecording();
-    console.log(samples);
     const cleanedSamples = viterbiCleaner.viterbi(samples);
     const notes = segmenter.analyse(cleanedSamples);
     const snapped = snapNotesToGrid(notes);
@@ -131,7 +131,13 @@
     };
     loop();
   }
-
+  function recomputeAfterNoteChange() {
+    const keyInfo = detectKey(buildChroma(playableNotes));
+    chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
+    const segments = chordAnalyser.analyseChords(playableNotes);
+    canvas.refreshAfterEdit(segments, keyInfo);
+    onAnalysed?.(playableNotes, keyInfo, segments);
+  }
   onDestroy(() => handler.stopRecording());
 </script>
 
@@ -162,7 +168,31 @@
   </div>
 
   <div class="canvas-wrap">
-    <PitchCanvas bind:this={canvas} />
+    <PitchCanvas
+      bind:this={canvas}
+      onNoteEdited={(index, newMidi) => {
+        playableNotes[index] = {
+          ...playableNotes[index],
+          avgMidifloat: newMidi,
+          anchorMidifloat: newMidi,
+        };
+        tonePlayer.previewNote(newMidi);
+        recomputeAfterNoteChange();
+      }}
+      onNoteDeleted={(index) => {
+        playableNotes = playableNotes.filter((_, i) => i !== index);
+        recomputeAfterNoteChange();
+      }}
+      onNoteResized={(index, newStartTime, newEndTime) => {
+        playableNotes[index].startTime = newStartTime;
+        playableNotes[index].endTime = newEndTime;
+        playableNotes[index].duration = newEndTime - newStartTime;
+        recomputeAfterNoteChange();
+      }}
+      onNoteSelected={(index) => {
+        tonePlayer.previewNote(playableNotes[index].avgMidifloat);
+      }}
+    />
   </div>
 
   <div class="controls">
@@ -290,7 +320,7 @@
     flex: none;
   }
   .swatch--on {
-    background: var(--accent);
+    background: var(--accent-2);
   }
   .swatch--off {
     background: var(--uncertain);

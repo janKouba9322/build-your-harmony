@@ -66,26 +66,30 @@ export function computeGeometry(
 }
 
 // Map a MIDI pitch to a y pixel within the plot (higher pitch = higher up).
-export function makeMidiToY(
+// Takes everything as plain args so it can be called directly in the hot loop
+// without allocating a closure every frame.
+export function midiToYPx(
+  midi: number,
   geo: PlotGeometry,
   rangeLo: number,
   rangeHi: number,
-): (midi: number) => number {
-  return (midi: number) =>
+): number {
+  return (
     geo.plotTop +
     geo.plotH -
-    ((midi - rangeLo) / (rangeHi - rangeLo)) * geo.plotH;
+    ((midi - rangeLo) / (rangeHi - rangeLo)) * geo.plotH
+  );
 }
 
 // Map a time (seconds) to an x pixel, given the current horizontal viewport.
-export function makeTimeToX(
+export function timeToXPx(
+  time: number,
   geo: PlotGeometry,
   gutter: number,
   firstVisibleTime: number,
   visibleSeconds: number,
-): (time: number) => number {
-  return (time: number) =>
-    gutter + ((time - firstVisibleTime) / visibleSeconds) * geo.plotW;
+): number {
+  return gutter + ((time - firstVisibleTime) / visibleSeconds) * geo.plotW;
 }
 
 // --- vertical range ------------------------------------------------------
