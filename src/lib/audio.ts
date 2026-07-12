@@ -9,8 +9,8 @@ async function getMicAccess(): Promise<MediaStream | null> {
         autoGainControl: false,
       },
     });
-  } catch (err) {
-    console.error("Mic not allowed:", err);
+  } catch {
+    // permission denied / no device — caller shows the user-facing message
     return null;
   }
 }
@@ -29,9 +29,12 @@ export class RecordHandler {
   private tracker: PitchTracker | null = null;
   private recordStartTime: number | null = null;
 
-  async startRecording(onPitch: PitchCallback): Promise<void> {
+  // resolves true when the mic is live; false when access was denied.
+  // recordStartTime is set only AFTER permission is granted, so t=0 is the
+  // moment audio actually starts flowing (not when the user clicked the button)
+  async startRecording(onPitch: PitchCallback): Promise<boolean> {
     const stream = await getMicAccess();
-    if (stream === null) return;
+    if (stream === null) return false;
 
     this.stream = stream;
     this.ctx = new AudioContext();
@@ -54,6 +57,7 @@ export class RecordHandler {
       this.rafId = requestAnimationFrame(loop);
     };
     loop();
+    return true;
   }
 
   stopRecording(): void {

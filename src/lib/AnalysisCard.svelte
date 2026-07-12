@@ -50,7 +50,7 @@
   });
 </script>
 
-<section class="card" aria-label="Analýza melodie">
+<section class="card" aria-label="Melody analysis">
   {#if !hasResults}
     <div class="empty">
       <span class="empty-mark" aria-hidden="true">♪</span>
@@ -141,23 +141,6 @@
       </div>
     {/if}
 
-    <!-- NOTE LIST -->
-    <div class="block">
-      <div class="block-head">Recognized tones</div>
-      <div class="note-list">
-        {#each notes as note}
-          <span
-            class="note-chip"
-            style:opacity={0.45 + 0.55 * note.avgClarity}
-            title="{secs(note.startTime)} · {note.duration.toFixed(
-              2,
-            )} s · certainty {Math.round(note.avgClarity * 100)}%"
-          >
-            {midiToName(Math.round(note.avgMidifloat))}
-          </span>
-        {/each}
-      </div>
-    </div>
   {/if}
 </section>
 
@@ -391,20 +374,4 @@
     flex: none;
   }
 
-  /* --- note chips --- */
-  .note-list {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-  .note-chip {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    padding: 5px 10px;
-    border-radius: 8px;
-    background: var(--raised);
-    border: 1px solid var(--line);
-    color: var(--text);
-    cursor: default;
-  }
 </style>

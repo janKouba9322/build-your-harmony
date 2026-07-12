@@ -5,7 +5,7 @@
    whole app (the canvas re-reads tokens on every draw).
    ============================================================ */
 
-@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap");
 
 :root {
   /* --- surfaces (deep indigo, warm undertone) --- */
@@ -38,8 +38,10 @@
   --r-ctl: 12px;
   --maxw: 860px;
 
-  /* --- type --- */
-  --font-display: "Bricolage Grotesque", "Inter", system-ui, sans-serif;
+  /* --- type ---
+     Display swapped from Bricolage Grotesque to Sora: rounder, quieter,
+     reads less like a template heading and more like a product wordmark. */
+  --font-display: "Sora", "Inter", system-ui, sans-serif;
   --font-body: "Inter", system-ui, -apple-system, sans-serif;
   --font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
 
@@ -92,6 +94,7 @@ h3 {
   margin: 0;
   font-family: var(--font-display);
   color: var(--text);
+  letter-spacing: -0.02em; /* Sora sits a touch looser than Bricolage by default */
 }
 
 p {
@@ -173,5 +176,37 @@ button {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   Responsive layer (mobile pass) — kept at the bottom so it wins
+   the cascade over component-level defaults where they overlap.
+   ============================================================ */
+
+/* app shell: less side padding once the viewport gets tight */
+@media (max-width: 560px) {
+  .wrap {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+/* recorder/controls: stack full-width instead of a cramped row */
+@media (max-width: 480px) {
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .controls .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* comfortable tap targets on touch devices, app-wide */
+@media (pointer: coarse) {
+  button {
+    min-height: 40px;
   }
 }

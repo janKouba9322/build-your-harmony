@@ -18,6 +18,7 @@
   const ACCEPTABLE_CLARITY = 0.7;
 
   let recording = $state(false);
+  let micError = $state(false); // mic permission denied / unavailable
   let samples: Sample[] = [];
   let currentNote = $state("–"); // large live readout
   let currentConfident = $state(false);
@@ -40,6 +41,19 @@
   const handler = new RecordHandler();
   const segmenter = new Segmenter();
   const tonePlayer = new TonePlayer();
+
+  // background tabs throttle requestAnimationFrame, which starves the pitch
+  // loop — finish the take instead of recording silence-with-holes
+  $effect(() => {
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (recording) finish();
+        else if (playing) stopPlayback();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  });
   const chordAnalyser = new ChordAnalyser();
   const pitchCleaner = new PitchVisualCleaner();
   const viterbiCleaner = new ViterbiCleaner();
@@ -77,8 +91,14 @@
     }
   }
 
-  function start() {
-    handler.startRecording(onPitch);
+  async function start() {
+    micError = false;
+    const ok = await handler.startRecording(onPitch);
+    if (!ok) {
+      // permission denied or no input device — tell the user, stay stopped
+      micError = true;
+      return;
+    }
     recording = true;
   }
 
@@ -99,11 +119,7 @@
   }
 
   function reset() {
-    tonePlayer.stop();
-    if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
-    playbackRaf = null;
-    playing = false;
-    canvas.setPlayhead(null);
+    stopPlayback(); // notes must fall silent immediately on reset
     handler.stopRecording();
     recording = false;
     currentNote = "–";
@@ -115,7 +131,12 @@
     onAnalysed?.([], null, []); // clear stale analysis in the parent too
   }
 
-  async function startPlayback() {
+  // one button, two roles: starts playback, or stops it when already playing
+  async function togglePlayback() {
+    if (playing) {
+      stopPlayback();
+      return;
+    }
     await tonePlayer.play(playableNotes); // grid-snapped notes
     playing = true;
     const loop = () => {
@@ -131,6 +152,16 @@
     };
     loop();
   }
+
+  // halt playback and clean up the cursor/raf — shared by the toggle and reset
+  function stopPlayback() {
+    tonePlayer.stop();
+    if (playbackRaf !== null) cancelAnimationFrame(playbackRaf);
+    playbackRaf = null;
+    playing = false;
+    canvas.setPlayhead(null);
+  }
+
   function recomputeAfterNoteChange() {
     const keyInfo = detectKey(buildChroma(playableNotes));
     chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
@@ -141,7 +172,7 @@
   onDestroy(() => handler.stopRecording());
 </script>
 
-<section class="card" aria-label="Nahrávání melodie">
+<section class="card" aria-label="Melody recording">
   <div class="live-row">
     <div
       class="note-readout"
@@ -210,10 +241,15 @@
     >
       Reset
     </button>
+    {#if micError}
+      <p class="mic-error" role="alert">
+        Microphone unavailable — allow access in your browser and try again.
+      </p>
+    {/if}
     {#if !recording && playableNotes.length > 0}
-      <button class="btn btn--ghost btn--play" onclick={startPlayback}>
+      <button class="btn btn--ghost btn--play" onclick={togglePlayback}>
         <span class="play-tri" aria-hidden="true"></span>
-        {playing ? "Playing…" : "Play"}
+        {playing ? "Stop" : "Play"}
       </button>
     {/if}
   </div>
@@ -412,5 +448,12 @@
     .controls .btn {
       flex: 1 1 auto;
     }
+  }
+  .mic-error {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-2);
+    margin-left: 4px;
+    align-self: center;
   }
 </style>

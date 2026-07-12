@@ -494,11 +494,17 @@
     ctx.textAlign = "center";
     ctx.fillStyle = palette.muted;
     ctx.globalAlpha = 0.8;
-    ctx.fillText(
-      "Turn on the mic — your pitch trace runs here",
-      GUTTER + geo.plotW / 2,
-      geo.plotTop + geo.plotH / 2,
-    );
+    const cx = GUTTER + geo.plotW / 2;
+    const cy = geo.plotTop + geo.plotH / 2;
+    const line1 = "Turn on the mic —";
+    const line2 = "your pitch trace runs here";
+    // one line when it fits, two stacked lines on narrow (mobile) canvases
+    if (ctx.measureText(line1 + " " + line2).width <= geo.plotW - 24) {
+      ctx.fillText(line1 + " " + line2, cx, cy);
+    } else {
+      ctx.fillText(line1, cx, cy - 9);
+      ctx.fillText(line2, cx, cy + 9);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -628,7 +634,7 @@
     return Math.abs(mouseX - edgeX) <= zone;
   }
 
-  function handleMouseDown(event: MouseEvent) {
+  function handleMouseDown(event: PointerEvent) {
     if (selectedNoteIndex < 0) return;
     const note = detectedNotes[selectedNoteIndex];
     const rect = canvasEl.getBoundingClientRect();
@@ -653,13 +659,13 @@
     noteResizing = { edge, noteIndex };
     // window-level (not canvas-level) so the drag keeps tracking even if the
     // cursor leaves the canvas bounds mid-drag
-    window.addEventListener("mousemove", handleResizeMove);
-    window.addEventListener("mouseup", handleResizeUp);
+    window.addEventListener("pointermove", handleResizeMove);
+    window.addEventListener("pointerup", handleResizeUp);
   }
 
   // live preview while dragging — updates the note locally and redraws, but
   // does NOT call onNoteResized yet (that only fires once, on mouseup)
-  function handleResizeMove(event: MouseEvent) {
+  function handleResizeMove(event: PointerEvent) {
     if (!noteResizing) return;
     const rect = canvasEl.getBoundingClientRect();
     const mouseX = event.clientX - rect.left;
@@ -701,8 +707,8 @@
     if (!noteResizing) return;
     const { noteIndex } = noteResizing;
     const note = detectedNotes[noteIndex];
-    window.removeEventListener("mousemove", handleResizeMove);
-    window.removeEventListener("mouseup", handleResizeUp);
+    window.removeEventListener("pointermove", handleResizeMove);
+    window.removeEventListener("pointerup", handleResizeUp);
     noteResizing = null;
     suppressNextClick = true;
     onNoteResized?.(noteIndex, note.startTime, note.endTime);
@@ -710,7 +716,7 @@
 
   // hover feedback (cursor only) when NOT dragging — shows the user where the
   // resize zones are before they click
-  function handleCanvasHover(event: MouseEvent) {
+  function handleCanvasHover(event: PointerEvent) {
     if (noteResizing) return; // actual dragging is handled by the window listeners
     if (selectedNoteIndex < 0) {
       canvasEl.style.cursor = "";
@@ -754,8 +760,8 @@
   // safety net: if the component is torn down mid-drag (e.g. "Start over"
   // clicked while resizing), don't leave orphaned window listeners behind
   onDestroy(() => {
-    window.removeEventListener("mousemove", handleResizeMove);
-    window.removeEventListener("mouseup", handleResizeUp);
+    window.removeEventListener("pointermove", handleResizeMove);
+    window.removeEventListener("pointerup", handleResizeUp);
   });
 
   function isMouseInNoteBounds(
@@ -876,8 +882,8 @@
     class="trace"
     bind:this={canvasEl}
     onclick={handleClick}
-    onmousedown={handleMouseDown}
-    onmousemove={handleCanvasHover}
+    onpointerdown={handleMouseDown}
+    onpointermove={handleCanvasHover}
     onkeydown={handleKeyDown}
     aria-label="Live trace"
   ></canvas>
@@ -937,6 +943,9 @@
     position: relative;
   }
   .trace {
+    /* touch: keep vertical page scroll, but let horizontal drags reach the
+       resize handlers instead of scrolling */
+    touch-action: pan-y;
     width: 100%;
     height: clamp(240px, 42vw, 320px);
     display: block;
@@ -1003,6 +1012,11 @@
   .note-controls__btn {
     width: 24px;
     height: 24px;
+    /* comfortable tap targets on coarse pointers (phones/tablets) */
+    @media (pointer: coarse) {
+      width: 34px;
+      height: 34px;
+    }
     display: flex;
     align-items: center;
     justify-content: center;
