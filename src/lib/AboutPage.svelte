@@ -12,27 +12,41 @@
 <section class="card about">
   <h2>About the app</h2>
   <p>
-    Melody Finder is a small tool for singers and bands. Hum or sing a melody
-    and it detects the notes, guesses the key, and suggests chord progressions
-    you can build on — a practice companion, not a finished-sound machine.
+    Build Your Harmony is a small tool for anyone who hums melodies they can't
+    quite write down. There's no AI in here. When you sing, what happens is
+    arithmetic: your voice vibrates at a certain speed, the app counts it to
+    find a pitch, then measures how far each note sits from the one before — and
+    reads those distances against patterns music has used for a very long time.
   </p>
   <p>
-    Everything runs in your browser. The recording never leaves your device:
-    no account, no server, no storage. The music-theory logic is written from
-    scratch; pitch detection uses the McLeod method via the
-    <code>pitchy</code> library.
+    Sometimes it hears wrong. Sometimes you'll sing a note that wasn't the one
+    you meant either. Neither is a failure; it's just where the work starts. You
+    shift a note, it re-reads the harmony, and between the two of you the melody
+    turns up.
   </p>
-
-  <h2>About the developer</h2>
+  <h2>Why this exists</h2>
   <p>
-    Built by a musician-developer who wanted a honest practice tool — one that
-    admits how sure (or unsure) it is about what it heard, instead of
-    pretending to be perfect.
+    I'm a high-school student, I write code, and I play drums in a band — which
+    lot of the time means being there when an idea turns up and nobody can quite
+    put it into words, let alone pass it on to the others. This is my attempt at
+    that problem.
+  </p>
+  <p>
+    It's for people who hear music clearly but were never taught to write it
+    down — who know a chord is right without knowing its name. Plenty of apps
+    offer to close that gap by generating the whole song for you. This one won't
+    do the work for you. It takes the idea you already had and turns it into
+    notes and chords you can read — the creativity stays yours.
   </p>
 
   <div class="links">
     {#each links as link}
-      <a class="link-pill" href={link.url} target="_blank" rel="noopener noreferrer">
+      <a
+        class="link-pill"
+        href={link.url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         {link.label}
       </a>
     {/each}
@@ -68,14 +82,6 @@
 
   p + h2 {
     margin-top: 26px;
-  }
-
-  code {
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    background: var(--raised);
-    padding: 1px 6px;
-    border-radius: 6px;
   }
 
   .links {

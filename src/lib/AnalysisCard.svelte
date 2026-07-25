@@ -56,8 +56,8 @@
       <span class="empty-mark" aria-hidden="true">♪</span>
       <p class="empty-title">No analysis yet</p>
       <p class="empty-sub">
-        Record the melody and click "Done — analyze." The key, suggested chords,
-        and recognized notes will then appear here.
+        Record the melody and click "Done — analyze." The key and suggested
+        chords, will then appear here.
       </p>
     </div>
   {:else}
@@ -140,7 +140,6 @@
         </p>
       </div>
     {/if}
-
   {/if}
 </section>
 
@@ -373,5 +372,4 @@
     font-size: 15px;
     flex: none;
   }
-
 </style>

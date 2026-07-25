@@ -22,7 +22,7 @@
       class:active={page === "app"}
       onclick={() => (page = "app")}
     >
-      App
+      Studio
     </button>
     <button
       class="pagenav-btn"
@@ -48,8 +48,7 @@
 
   <footer class="foot">
     <span class="foot-dot" aria-hidden="true"></span>
-    The recording doesn't leave your device—no account, no server, no storage. The
-    audio is processed solely by your browser.
+    Built between rehearsals.
   </footer>
 </main>
 

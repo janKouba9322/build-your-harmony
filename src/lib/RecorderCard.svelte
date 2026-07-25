@@ -11,22 +11,26 @@
   import { PitchVisualCleaner } from "./pitchVisualCleaner";
   import { ViterbiCleaner } from "./viterbiCleaner";
   import { CONFIDENCE_CLARITY } from "./constans";
+  import HelpModal from "./HelpModal.svelte";
 
   // pitch-validity gating
   const MIN_FREQ = 70;
   const MAX_FREQ = 1100;
   const ACCEPTABLE_CLARITY = 0.7;
 
+  const MAX_RECORDING_SECONDS = 30; // cap a take so long sessions don't pile up memory
+
   let recording = $state(false);
-  let micError = $state(false); // mic permission denied / unavailable
+  let notice = $state<string | null>(null); // transient message shown under the controls
   let samples: Sample[] = [];
   let currentNote = $state("–"); // large live readout
   let currentConfident = $state(false);
-  let hasSamples = $state(false); // enables the "start over" button
 
   let playableNotes: Note[] = $state([]);
   let playing = $state(false);
   let playbackRaf: number | null = null;
+
+  let helpOpen = $state(false);
 
   let {
     onAnalysed,
@@ -64,6 +68,11 @@
   }
 
   function onPitch(freq: number, clarity: number, time: number) {
+    if (time >= MAX_RECORDING_SECONDS) {
+      notice = `Recording stopped — ${MAX_RECORDING_SECONDS}s limit reached.`;
+      finish();
+      return;
+    }
     const valid = isValidPitch(freq) && clarity > ACCEPTABLE_CLARITY;
     const confident = valid && clarity > CONFIDENCE_CLARITY;
     const midi = valid ? freqToMidi(freq) : NaN;
@@ -76,8 +85,6 @@
       if (confident) currentNote = midiToName(midi);
     }
     canvas.tick(time);
-
-    hasSamples = true;
   }
 
   function toggle() {
@@ -92,14 +99,16 @@
   }
 
   async function start() {
-    micError = false;
+    notice = null;
     const ok = await handler.startRecording(onPitch);
     if (!ok) {
       // permission denied or no input device — tell the user, stay stopped
-      micError = true;
+      notice =
+        "Microphone unavailable — allow access in your browser and try again.";
       return;
     }
     recording = true;
+    canvas.start();
   }
 
   function finish() {
@@ -121,10 +130,10 @@
   function reset() {
     stopPlayback(); // notes must fall silent immediately on reset
     handler.stopRecording();
+    notice = null;
     recording = false;
     currentNote = "–";
     currentConfident = false;
-    hasSamples = false;
     playableNotes = []; // hide the play button again
     samples = [];
     canvas.clear();
@@ -173,6 +182,7 @@
 </script>
 
 <section class="card" aria-label="Melody recording">
+  <button class="help-btn" onclick={() => (helpOpen = true)}>Help</button>
   <div class="live-row">
     <div
       class="note-readout"
@@ -212,7 +222,11 @@
       }}
       onNoteDeleted={(index) => {
         playableNotes = playableNotes.filter((_, i) => i !== index);
-        recomputeAfterNoteChange();
+        if (playableNotes.length === 0) {
+          reset();
+        } else {
+          recomputeAfterNoteChange();
+        }
       }}
       onNoteResized={(index, newStartTime, newEndTime) => {
         playableNotes[index].startTime = newStartTime;
@@ -223,6 +237,7 @@
       onNoteSelected={(index) => {
         tonePlayer.previewNote(playableNotes[index].avgMidifloat);
       }}
+      onSpacePressed={() => togglePlayback()}
     />
   </div>
 
@@ -234,31 +249,24 @@
     >
       {recording ? "Done — analyze" : "Start recording"}
     </button>
-    <button
-      class="btn btn--ghost"
-      disabled={!recording && !hasSamples}
-      onclick={reset}
-    >
-      Reset
-    </button>
-    {#if micError}
-      <p class="mic-error" role="alert">
-        Microphone unavailable — allow access in your browser and try again.
-      </p>
+    {#if notice}
+      <p class="notice" role="status">{notice}</p>
     {/if}
+
     {#if !recording && playableNotes.length > 0}
       <button class="btn btn--ghost btn--play" onclick={togglePlayback}>
         <span class="play-tri" aria-hidden="true"></span>
         {playing ? "Stop" : "Play"}
       </button>
     {/if}
-  </div>
 
-  <p class="hint">
-    Sing one note after another, close to the microphone. It’s not about singing
-    “cleanly”— it’s enough if the intervals between the notes are accurate.
-  </p>
+    {#if recording || playableNotes.length > 0}
+      <button class="btn btn--ghost" onclick={reset}>Reset</button>
+    {/if}
+  </div>
 </section>
+
+<HelpModal open={helpOpen} onClose={() => (helpOpen = false)} />
 
 <style>
   /* card container with a warm hairline on top */
@@ -287,13 +295,14 @@
     align-items: center;
     gap: clamp(16px, 4vw, 26px);
     flex-wrap: wrap;
+    padding-right: 64px; /* clear the absolutely-positioned Help button */
   }
 
   /* large live note readout */
   .note-readout {
     font-family: var(--font-display);
     font-weight: 800;
-    font-size: clamp(52px, 13vw, 76px);
+    font-size: clamp(52px, 1vw, 76px);
     line-height: 1;
     letter-spacing: -0.03em;
     width: 118px;
@@ -435,13 +444,13 @@
   }
 
   /* helper hint text */
-  .hint {
+  /* .hint {
     font-family: var(--font-mono);
     font-size: 12.5px;
     color: var(--muted);
     margin-top: 18px;
     line-height: 1.6;
-  }
+  } */
 
   /* mobile: buttons stretch full width for easy thumbs */
   @media (max-width: 560px) {
@@ -449,11 +458,33 @@
       flex: 1 1 auto;
     }
   }
-  .mic-error {
+  .notice {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--accent-2);
-    margin-left: 4px;
-    align-self: center;
+    margin-top: 12px;
+    line-height: 1.5;
+  }
+  /* corner help trigger — opens the full-screen guide */
+  .help-btn {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 2;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 14px;
+    cursor: pointer;
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .help-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
   }
 </style>

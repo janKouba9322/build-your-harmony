@@ -79,6 +79,7 @@
   let keyMode: KeyMode | null = null; // needed to render roman numerals
   let selectedNoteIndex = $state(-1); // clicked note (highlighted teal)
   let playhead: number | null = null;
+  let isRecording = false;
 
   let controlsX = $state(-1);
   let controlsY = $state(-1);
@@ -90,6 +91,9 @@
   // onNoteResized in handleResizeUp (not on every mousemove).
   type ResizeDrag = { edge: "start" | "end"; noteIndex: number } | null;
   let noteResizing: ResizeDrag = null;
+
+  type MoveDrag = { noteIndex: number; prevMouseX: number } | null;
+  let noteMoving: MoveDrag = null;
   // the mouseup that ends a drag still fires a trailing click afterwards —
   // this swallows that one click so it doesn't re-run selection logic
   let suppressNextClick = false;
@@ -122,8 +126,8 @@
   // Ease (live) or snap (review) the vertical range toward the sung pitches.
   // Live uses confident visual samples; review uses the cleaned samples.
   function updateRange() {
-    const isRecording = detectedNotes.length === 0;
-    if (isRecording) {
+    const isLive = detectedNotes.length === 0;
+    if (isLive) {
       // live: read the running min/max (O(1)) instead of scanning history
       const midis =
         liveMinMidi <= liveMaxMidi ? [liveMinMidi, liveMaxMidi] : [];
@@ -425,7 +429,7 @@
   ) {
     ctx.save();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = palette.accent3;
+    ctx.strokeStyle = "white";
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -489,7 +493,8 @@
 
   // --- hint shown on the empty canvas before anything is sung ---
   function drawEmptyStateHint(ctx: CanvasRenderingContext2D) {
-    if (visualHistory.length > 0 || detectedNotes.length > 0) return;
+    if (visualHistory.length > 0 || detectedNotes.length > 0 || isRecording)
+      return;
     ctx.font = '12px "Space Mono", monospace';
     ctx.textAlign = "center";
     ctx.fillStyle = palette.muted;
@@ -620,6 +625,10 @@
         }
       }
     }
+    if (event.key === " ") {
+      onSpacePressed?.();
+      event.preventDefault();
+    }
   }
 
   // is mouseX within the resize zone around a note edge? The zone shrinks
@@ -652,6 +661,8 @@
       startResize("start", selectedNoteIndex);
     } else if (inResizeZone(mouseX, endX, startX, endX)) {
       startResize("end", selectedNoteIndex);
+    } else if (isMouseInNoteBounds(note, mouseX, mouseY)) {
+      startMove(mouseX, selectedNoteIndex);
     }
   }
 
@@ -711,6 +722,7 @@
     window.removeEventListener("pointerup", handleResizeUp);
     noteResizing = null;
     suppressNextClick = true;
+    updateTimelineExtent();
     onNoteResized?.(noteIndex, note.startTime, note.endTime);
   }
 
@@ -739,6 +751,68 @@
     canvasEl.style.cursor = nearEdge ? "ew-resize" : "";
   }
 
+  function startMove(mouseX: number, noteIndex: number) {
+    noteMoving = { noteIndex: noteIndex, prevMouseX: mouseX };
+    window.addEventListener("pointermove", applyMove);
+    window.addEventListener("pointerup", handleMoveUp);
+  }
+
+  function applyMove(event: PointerEvent) {
+    if (!noteMoving) return;
+    const rect = canvasEl.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const deltaX = mouseX - noteMoving.prevMouseX;
+    const deltaTime = (deltaX / geo.plotW) * VISIBLE_SECONDS;
+
+    const noteIndex = noteMoving.noteIndex;
+    const note = detectedNotes[noteIndex];
+    const startTimeCandidate = note.startTime + deltaTime;
+    const endTimeCandidate = note.endTime + deltaTime;
+
+    const nextNoteStartTime =
+      noteIndex < detectedNotes.length - 1
+        ? detectedNotes[noteIndex + 1].startTime
+        : Infinity;
+    const previousNoteEndTime =
+      noteIndex > 0 ? detectedNotes[noteIndex - 1].endTime : -Infinity;
+
+    if (
+      startTimeCandidate > previousNoteEndTime + 0.0001 &&
+      endTimeCandidate < nextNoteStartTime - 0.0001 &&
+      startTimeCandidate >= 0
+    ) {
+      note.startTime = startTimeCandidate;
+      note.endTime = endTimeCandidate;
+      note.duration = note.endTime - note.startTime;
+      draw();
+    }
+    noteMoving.prevMouseX = mouseX;
+  }
+  function handleMoveUp() {
+    if (!noteMoving) return;
+    const { noteIndex } = noteMoving;
+    const note = detectedNotes[noteIndex];
+    window.removeEventListener("pointermove", applyMove);
+    window.removeEventListener("pointerup", handleMoveUp);
+    noteMoving = null;
+    suppressNextClick = true;
+    updateTimelineExtent();
+    onNoteResized?.(noteIndex, note.startTime, note.endTime);
+  }
+
+  function updateSpacerWidth() {
+    const view = scrollerEl.clientWidth || 1;
+    spacerWidth = view * Math.max(1, lastTime / VISIBLE_SECONDS);
+  }
+
+  function updateTimelineExtent() {
+    const last = detectedNotes[detectedNotes.length - 1];
+    const newLastTime = last ? last.endTime : 0;
+    if (newLastTime !== lastTime) {
+      lastTime = newLastTime + 0.1;
+      updateSpacerWidth();
+    }
+  }
   onMount(() => {
     palette = readPalette();
     draw(); // show the grid + hint before any recording starts
@@ -814,9 +888,15 @@
     firstVisibleTime = 0;
     lastTime = 0;
     spacerWidth = 0;
+    isRecording = false;
     selectedNoteIndex = -1;
     liveMinMidi = Infinity;
     liveMaxMidi = -Infinity;
+    draw();
+  }
+
+  export function start() {
+    isRecording = true;
     draw();
   }
 
@@ -828,13 +908,14 @@
     _cleanedSamples: Sample[],
     _keyInfo?: KeyInfo | null,
   ) {
+    isRecording = false;
     detectedNotes = _notes;
     originalDetectedNotes = _notes.map((n) => ({ ...n }));
     chordSegments = _chordSegments;
     cleanedSamples = _cleanedSamples.filter((s) => Number.isFinite(s.midi));
     keyMode = _keyInfo?.mode ?? null;
-    const view = scrollerEl.clientWidth || 1;
-    spacerWidth = view * Math.max(1, lastTime / VISIBLE_SECONDS);
+    lastTime += 0.1;
+    updateSpacerWidth();
     await domTick(); // wait for the spacer to actually widen…
     scrollerEl.scrollLeft = scrollerEl.scrollWidth; // …then pin the thumb right (triggers onScroll → redraw)
     draw();
@@ -864,6 +945,7 @@
     onNoteDeleted,
     onNoteResized,
     onNoteSelected,
+    onSpacePressed,
   }: {
     onNoteEdited?: (index: number, newMidi: number) => void;
     onNoteDeleted?: (index: number) => void;
@@ -873,6 +955,7 @@
       newEndTime: number,
     ) => void;
     onNoteSelected?: (index: number) => void;
+    onSpacePressed?: () => void;
   } = $props();
 </script>
 
