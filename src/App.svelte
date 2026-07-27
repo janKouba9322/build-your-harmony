@@ -49,6 +49,14 @@
   <footer class="foot">
     <span class="foot-dot" aria-hidden="true"></span>
     Built between rehearsals.
+    <a
+      class="foot-link"
+      href="https://github.com/janKouba9322/build-your-harmony"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      GitHub
+    </a>
   </footer>
 </main>
 
@@ -100,6 +108,16 @@
     font-size: 11.5px;
     line-height: 1.7;
     color: var(--muted);
+  }
+  .foot-link {
+    color: var(--accent-3);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }
+
+  .foot-link:hover,
+  .foot-link:focus-visible {
+    border-bottom-color: currentColor;
   }
   .foot-dot {
     display: inline-block;
