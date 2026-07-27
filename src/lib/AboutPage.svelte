@@ -3,9 +3,9 @@
   // Rendered instead of the recorder/analysis when the user switches pages.
   // Update the links below with your real profiles before deploying.
   const links = [
-    { label: "GitHub", url: "https://github.com/your-username" },
-    { label: "Instagram", url: "https://instagram.com/your-username" },
-    { label: "Buy me a coffee", url: "https://buymeacoffee.com/your-username" },
+    { label: "GitHub", url: "https://github.com/janKouba9322/" },
+    { label: "Instagram", url: "https://www.instagram.com/medicore_coder/" },
+    { label: "Buy me a coffee", url: "https://buymeacoffee.com/medicorecoder" },
   ];
 </script>
 

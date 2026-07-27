@@ -18,7 +18,7 @@
   const MAX_FREQ = 1100;
   const ACCEPTABLE_CLARITY = 0.7;
 
-  const MAX_RECORDING_SECONDS = 30; // cap a take so long sessions don't pile up memory
+  const MAX_RECORDING_SECONDS = 60; // cap a take so long sessions don't pile up memory
 
   let recording = $state(false);
   let notice = $state<string | null>(null); // transient message shown under the controls
