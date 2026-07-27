@@ -4,8 +4,8 @@
   // Update the links below with your real profiles before deploying.
   const links = [
     { label: "GitHub", url: "https://github.com/janKouba9322/" },
-    { label: "Instagram", url: "https://www.instagram.com/medicore_coder/" },
-    { label: "Buy me a coffee", url: "https://buymeacoffee.com/medicorecoder" },
+    { label: "Instagram", url: "https://www.instagram.com/mediocre_coder/" },
+    { label: "Buy me a coffee", url: "https://buymeacoffee.com/mediocrecoder" },
   ];
 </script>
 
