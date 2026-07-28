@@ -20,8 +20,7 @@ export type CanvasPalette = {
   raised: string;
 };
 
-// Read the current token values off :root. Called on every draw so a live
-// palette change in app.css shows up on the canvas immediately.
+// Read the current token values off :root. Called on mount
 export function readPalette(): CanvasPalette {
   const cs = getComputedStyle(document.documentElement);
   const read = (name: string) => cs.getPropertyValue(name).trim();
@@ -115,12 +114,6 @@ export function computeTargetRange(
   }
   return { lo, hi };
 }
-
-// A sample counts as "confident" when its clarity clears the threshold.
-export function isConfident(sample: Sample, clarityThreshold: number): boolean {
-  return sample.clarity > clarityThreshold;
-}
-
 // --- shapes --------------------------------------------------------------
 
 // Trace a rounded rectangle path (kept explicit for older canvas engines that

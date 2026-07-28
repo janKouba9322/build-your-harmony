@@ -1,10 +1,10 @@
-import { T_MAJOR, T_MINOR } from "./constans";
+import { T_MAJOR, T_MINOR } from "./constants";
 import type { KeyInfo, KeyMode, Note } from "./types";
 
 // --- public pipeline: straighten → buildChroma → detectKey ---
 
 // Correct for consistent detuning by shifting every note by one shared offset
-// (median deviation from the semitone grid). Does NOT round — keeps the fine
+// (median deviation from the semitone grid).
 // pitch so callers can still see how close each note sat to the grid.
 export function snapNotesToGrid(notes: Note[]): Note[] {
   const offset = findTuningOffset(notes);
@@ -14,8 +14,7 @@ export function snapNotesToGrid(notes: Note[]): Note[] {
   }));
 }
 
-// Weighted pitch-class histogram (weight = sampleCount × avgClarity).
-// Rounds to a pitch class here, where the integer is actually needed.
+// Weighted pitch-class histogram
 export function buildChroma(snappedNotes: Note[]): number[] {
   const chroma = new Array(12).fill(0);
   for (const note of snappedNotes) {
@@ -25,7 +24,7 @@ export function buildChroma(snappedNotes: Note[]): number[] {
   return chroma;
 }
 
-// Correlate the chroma against all 24 rotated Krumhansl-Kessler profiles,
+// Correlate the chroma against all 24 rotated Temperley profiles,
 // pick the best. Confidence is the (rough) margin over the runner-up.
 export function detectKey(chroma: number[]): KeyInfo {
   let best = { score: -2, tonic: 0, mode: "major" as KeyMode };

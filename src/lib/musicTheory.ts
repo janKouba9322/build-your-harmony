@@ -1,16 +1,5 @@
-import { NOTES } from "./constans";
+import { NOTES } from "./constants";
 import type { ChordSegment, KeyMode } from "./types";
-
-export function freqToNote(freq: number) {
-  const midiFloat: number = 69 + 12 * Math.log2(freq / 440);
-  const midi: number = Math.round(midiFloat);
-
-  const name: string = NOTES[((midi % 12) + 12) % 12];
-  const octave: number = Math.floor(midi / 12) - 1;
-  const cents: number = Math.round((midiFloat - midi) * 100);
-
-  return { name, octave, cents };
-}
 
 export function freqToMidi(freq: number): number {
   return 69 + 12 * Math.log2(freq / 440);
@@ -25,7 +14,7 @@ export function midiToName(midi: number): string {
   return NOTES[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
 }
 
-// pitch class (0–11) → note name, no octave (Czech H for B natural)
+// pitch class (0–11) → note name, no octave
 export function pitchClassName(pc: number): string {
   return NOTES[((pc % 12) + 12) % 12];
 }
@@ -54,7 +43,7 @@ export function chordLabel(
   return isDim ? `${root}dim` : isMinor ? `${root}m` : root;
 }
 
-// "C dur" / "a moll" — Czech key label from tonic pitch class + mode
+// "C major" / "a minor"
 export function keyLabel(tonic: number, mode: KeyMode): string {
   return `${pitchClassName(tonic)} ${mode}`;
 }

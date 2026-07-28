@@ -20,7 +20,7 @@
     segments: ChordSegment[];
   } = $props();
 
-  // confidence 0–1 → level key (safe for CSS classes) + Czech label.
+  // confidence 0–1 → level key (safe for CSS classes) + label.
   // Levels map to the voice colors: certain=teal, maybe=amber, unsure=coral.
   type ConfLevel = "high" | "mid" | "low";
   function confidenceLevel(c: number): ConfLevel {

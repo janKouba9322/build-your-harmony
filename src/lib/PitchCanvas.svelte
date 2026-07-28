@@ -21,7 +21,7 @@
     chordUncertain,
   } from "./musicTheory";
   import type { ChordSegment, KeyInfo, KeyMode, Note, Sample } from "./types";
-  import { CONFIDENCE_CLARITY } from "./constans";
+  import { CONFIDENCE_CLARITY } from "./constants";
   import {
     readPalette,
     computeGeometry,
@@ -356,7 +356,6 @@
     ctx.lineCap = "round";
     ctx.lineWidth = NOTE_BAR_WIDTH;
     if (review) {
-      // soft glow makes the "decided melody" read as the hero layer
       ctx.shadowColor = palette.accent;
       ctx.shadowBlur = 7;
     }
@@ -675,7 +674,7 @@
   }
 
   // live preview while dragging — updates the note locally and redraws, but
-  // does NOT call onNoteResized yet (that only fires once, on mouseup)
+  // does NOT call onNoteResized yet (that only fires once, on pointerup)
   function handleResizeMove(event: PointerEvent) {
     if (!noteResizing) return;
     const rect = canvasEl.getBoundingClientRect();

@@ -10,7 +10,7 @@
   import { ChordAnalyser } from "./analyseChords";
   import { PitchVisualCleaner } from "./pitchVisualCleaner";
   import { ViterbiCleaner } from "./viterbiCleaner";
-  import { CONFIDENCE_CLARITY } from "./constans";
+  import { CONFIDENCE_CLARITY } from "./constants";
   import HelpModal from "./HelpModal.svelte";
 
   // pitch-validity gating
@@ -69,7 +69,7 @@
 
   function onPitch(freq: number, clarity: number, time: number) {
     if (time >= MAX_RECORDING_SECONDS) {
-      notice = `Recording stopped — ${MAX_RECORDING_SECONDS}s limit reached.`;
+      notice = `Recording stopped — ${MAX_RECORDING_SECONDS}s limit reached. `;
       finish();
       return;
     }
@@ -115,16 +115,28 @@
     handler.stopRecording();
     const cleanedSamples = viterbiCleaner.viterbi(samples);
     const notes = segmenter.analyse(cleanedSamples);
-    const snapped = snapNotesToGrid(notes);
-    playableNotes = snapped;
-    const keyInfo = detectKey(buildChroma(snapped));
+    if (notes.length > 0) {
+      const snapped = snapNotesToGrid(notes);
+      playableNotes = snapped;
+      const keyInfo = detectKey(buildChroma(snapped));
 
-    chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
-    const segments = chordAnalyser.analyseChords(snapped);
-    canvas.finish(snapped, segments, cleanedSamples, keyInfo);
-    onAnalysed?.(snapped, keyInfo, segments);
+      chordAnalyser.setTonic(keyInfo.tonic, keyInfo.mode);
+      const segments = chordAnalyser.analyseChords(snapped);
+      canvas.finish(snapped, segments, cleanedSamples, keyInfo);
+      onAnalysed?.(snapped, keyInfo, segments);
+    } else {
+      canvas.clear();
+      onAnalysed?.([], null, []);
+      playableNotes = [];
+      const NOTHING_DETECTED =
+        "I didn't detect anything; try recording it again.";
+      notice = notice ? `${notice} ${NOTHING_DETECTED}` : NOTHING_DETECTED;
+    }
+
     recording = false;
     currentConfident = false;
+    samples = [];
+    pitchCleaner.reset();
   }
 
   function reset() {
@@ -442,15 +454,6 @@
     border-width: 6px 0 6px 10px;
     border-color: transparent transparent transparent var(--accent);
   }
-
-  /* helper hint text */
-  /* .hint {
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    color: var(--muted);
-    margin-top: 18px;
-    line-height: 1.6;
-  } */
 
   /* mobile: buttons stretch full width for easy thumbs */
   @media (max-width: 560px) {

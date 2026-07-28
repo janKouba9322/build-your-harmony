@@ -1,10 +1,10 @@
 import type { Note, Sample } from "./types";
 
 const MIDI_THRESHOLD = 1; // how close a pitch must be (semitones) to count as the same note
-const ANCHOR_LOCK_FRAME_LENGTH = 15; // after this many frames the anchor pitch freezes (resists slow drift)
+const ANCHOR_LOCK_SAMPLE_COUNT = 15; // after this many frames the anchor pitch freezes (resists slow drift)
 const MIN_NOTE_DURATION = 0.08; // notes shorter than this (seconds) are discarded as blips
 const MAX_GAP_DURATION = 0.1; // a return within this gap (seconds) re-joins the previous note
-const MIN_NOTE_FRAME_LENGTH = 8; // a real note needs at least this many actual samples
+const MIN_NOTE_SAMPLE_COUNT = 15; // a real note needs at least this many actual samples
 
 function emptyNote(): Note {
   return {
@@ -54,7 +54,7 @@ export class Segmenter {
       currentNote.avgMidifloat = weightedSum / totalWeight;
 
       // the anchor only averages the first few frames, then locks
-      if (n <= ANCHOR_LOCK_FRAME_LENGTH) {
+      if (n <= ANCHOR_LOCK_SAMPLE_COUNT) {
         currentNote.anchorMidifloat = weightedSum / totalWeight;
       }
     }
@@ -64,7 +64,7 @@ export class Segmenter {
     // closing sample's time, or silence between notes gets glued onto the end.
     function closeNote() {
       const longEnough = currentNote.duration >= MIN_NOTE_DURATION;
-      const denseEnough = currentNote.sampleCount >= MIN_NOTE_FRAME_LENGTH;
+      const denseEnough = currentNote.sampleCount >= MIN_NOTE_SAMPLE_COUNT;
       weightedSum = 0;
       totalWeight = 0;
       if (longEnough && denseEnough) {

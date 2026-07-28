@@ -5,6 +5,9 @@ const OCTAVE = 12;
 
 export class ViterbiCleaner {
   viterbi(samples: Sample[]): Sample[] {
+    if (samples.length === 0) {
+      return [];
+    }
     const N = samples.length;
     const cands = samples.map((s) => this.candidatesFor(s.midi));
 

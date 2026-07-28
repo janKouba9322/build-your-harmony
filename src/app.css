@@ -1,11 +1,9 @@
 /* ============================================================
-   Melody Finder — "večerní zkušebna" design system
+   Build your harmony — "večerní zkušebna" design system
    Every color lives here as a token. Components and the canvas
    both read these, so changing the palette below restyles the
    whole app (the canvas re-reads tokens on every draw).
    ============================================================ */
-
-@import url("https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap");
 
 :root {
   /* --- surfaces (deep indigo, warm undertone) --- */
@@ -41,8 +39,8 @@
   /* --- type ---
      Display swapped from Bricolage Grotesque to Sora: rounder, quieter,
      reads less like a template heading and more like a product wordmark. */
-  --font-display: "Sora", "Inter", system-ui, sans-serif;
-  --font-body: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Sora Variable", "Inter Variable", system-ui, sans-serif;
+  --font-body: "Inter Variable", system-ui, -apple-system, sans-serif;
   --font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
 
   color-scheme: dark;

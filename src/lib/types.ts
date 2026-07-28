@@ -1,11 +1,3 @@
-export interface Tone {
-  note: string;
-  octave: number;
-  cents: string;
-  step: string;
-  uncertain: boolean;
-}
-
 export type Note = {
   duration: number; // seconds, endTime - startTime
   sampleCount: number; // number of samples that landed in this note
