@@ -37,7 +37,9 @@
   type VisualSample = { time: number; midi: number; confident: boolean };
 
   // --- layout constants ---
-  const VISIBLE_SECONDS = 3;
+  const TARGET_PX_PER_SECOND = 180; // keeps note bars similarly wide on any screen
+  const MIN_VISIBLE_SECONDS = 2;
+  const MAX_VISIBLE_SECONDS = 4;
   const CURSOR_POSITION_RATIO = 0.8; // where the playhead sits in the window while playing
 
   const CONTROLS_X_OFFSET = 48;
@@ -74,12 +76,12 @@
   // --- viewport / range state ---
   let rangeLo = DEFAULT_LO;
   let rangeHi = DEFAULT_HI;
+  let visibleSeconds = MAX_VISIBLE_SECONDS;
   let firstVisibleTime = 0; // left edge of the [.., +VISIBLE_SECONDS] window
   let lastTime = 0; // newest sample time seen
 
   // Running min/max of confident live pitches, updated in push() rather than
-  // recomputed from the whole history every draw. Keeps the per-frame cost flat
-  // no matter how long the recording gets.
+  // recomputed from the whole history every draw.
   let liveMinMidi = Infinity;
   let liveMaxMidi = -Infinity;
 
@@ -127,12 +129,12 @@
     return midiToYPx(midi, geo, rangeLo, rangeHi);
   }
   function timeToX(time: number): number {
-    return timeToXPx(time, geo, GUTTER, firstVisibleTime, VISIBLE_SECONDS);
+    return timeToXPx(time, geo, GUTTER, firstVisibleTime, visibleSeconds);
   }
 
   // leftmost time that still keeps the newest sample pinned to the right edge
   function maxFirst(): number {
-    return Math.max(0, lastTime - VISIBLE_SECONDS);
+    return Math.max(0, lastTime - visibleSeconds);
   }
 
   function loadPalette(attempt = 0) {
@@ -283,7 +285,7 @@
     ctx.textAlign = "center";
     ctx.font = '9px "Space Mono", monospace';
     const tickStart = Math.ceil(firstVisibleTime);
-    const tickEnd = Math.floor(firstVisibleTime + VISIBLE_SECONDS);
+    const tickEnd = Math.floor(firstVisibleTime + visibleSeconds);
     for (let t = tickStart; t <= tickEnd; t++) {
       const x = timeToX(t);
       if (x < GUTTER + 10) continue;
@@ -695,7 +697,7 @@
     const rect = canvasEl.getBoundingClientRect();
     const mouseX = event.clientX - rect.left;
     const newTime =
-      firstVisibleTime + ((mouseX - GUTTER) / geo.plotW) * VISIBLE_SECONDS;
+      firstVisibleTime + ((mouseX - GUTTER) / geo.plotW) * visibleSeconds;
     const note = detectedNotes[noteResizing.noteIndex];
 
     if (noteResizing.edge === "start") {
@@ -775,7 +777,7 @@
     const rect = canvasEl.getBoundingClientRect();
     const mouseX = event.clientX - rect.left;
     const deltaX = mouseX - noteMoving.prevMouseX;
-    const deltaTime = (deltaX / geo.plotW) * VISIBLE_SECONDS;
+    const deltaTime = (deltaX / geo.plotW) * visibleSeconds;
 
     const noteIndex = noteMoving.noteIndex;
     const note = detectedNotes[noteIndex];
@@ -814,7 +816,7 @@
 
   function updateSpacerWidth() {
     const view = scrollerEl.clientWidth || 1;
-    spacerWidth = view * Math.max(1, lastTime / VISIBLE_SECONDS);
+    spacerWidth = view * Math.max(1, lastTime / visibleSeconds);
   }
   function startPointerScroll(mouseX: number) {
     scrolledByPointer = { prevMouseX: mouseX };
@@ -937,15 +939,47 @@
       updateSpacerWidth();
     }
   }
+
+  function updateVisibleSeconds(): boolean {
+    const plotW = (canvasEl?.clientWidth ?? 0) - GUTTER;
+    if (plotW <= 0) return false;
+    const next = Math.max(
+      MIN_VISIBLE_SECONDS,
+      Math.min(MAX_VISIBLE_SECONDS, plotW / TARGET_PX_PER_SECOND),
+    );
+    if (next === visibleSeconds) return false;
+    visibleSeconds = next;
+    return true;
+  }
+  async function applyVisibleSecondsChange() {
+    if (isRecording) {
+      draw(); // the cursor drives the viewport while recording; no scroller yet
+      return;
+    }
+    const anchor = Math.min(firstVisibleTime, maxFirst());
+    firstVisibleTime = anchor;
+    updateSpacerWidth();
+    await domTick();
+    const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
+    const top = maxFirst();
+    scrollerEl.scrollLeft = top > 0 ? (anchor / top) * max : 0; // …then re-anchor
+    updateThumb();
+    draw();
+  }
   onMount(() => {
+    updateVisibleSeconds();
     loadPalette();
     draw(); // show the grid + hint before any recording starts
     // web fonts arrive async — redraw once loaded so canvas text uses them
     document.fonts?.ready.then(() => draw());
     // responsive: re-render crisply whenever the container resizes
     const ro = new ResizeObserver(() => {
-      updateThumb(); // track width changed — the thumb's scale did too
-      draw();
+      if (updateVisibleSeconds()) {
+        applyVisibleSecondsChange();
+      } else {
+        updateThumb();
+        draw();
+      }
     });
     ro.observe(canvasEl);
     return () => ro.disconnect();
@@ -966,8 +1000,6 @@
     untrack(() => updateThumb());
   });
 
-  // safety net: if the component is torn down mid-drag (e.g. "Start over"
-  // clicked while resizing), don't leave orphaned window listeners behind
   onDestroy(() => {
     window.removeEventListener("pointermove", handleResizeMove);
     window.removeEventListener("pointerup", handleResizeUp);
@@ -1073,7 +1105,7 @@
     playhead = t;
     if (playhead !== null) {
       selectedNoteIndex = -1;
-      const cursorPosition = VISIBLE_SECONDS * CURSOR_POSITION_RATIO;
+      const cursorPosition = visibleSeconds * CURSOR_POSITION_RATIO;
       const desired = playhead > cursorPosition ? playhead - cursorPosition : 0;
       firstVisibleTime = Math.min(desired, maxFirst()); // clamp at the end
     }
@@ -1307,8 +1339,7 @@
     margin-top: 6px;
     /* leave room for the gutter so the bar lines up with the plot, not the axis */
     margin-left: 44px;
-    touch-action: pan-y; /* vertical stays page scroll; horizontal is ours */
-    user-select: none;
+    touch-action: pan-y;
     user-select: none; /* a mouse drag shouldn't select surrounding text */
   }
 
@@ -1346,6 +1377,8 @@
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none; /* Firefox */
+    touch-action: pan-y; /* vertical stays page scroll; horizontal is ours */
+    user-select: none;
   }
   .scroller::-webkit-scrollbar {
     display: none; /* Chrome, Edge, Safari */
