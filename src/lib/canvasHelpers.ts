@@ -135,3 +135,9 @@ export function roundRectPath(
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
 }
+
+// Every value is checked, not a sample: a single mistyped token name would
+// otherwise slip through while the rest of the palette looks fine.
+export function isPaletteReady(p: CanvasPalette): boolean {
+  return Object.values(p).every((v) => v !== "");
+}

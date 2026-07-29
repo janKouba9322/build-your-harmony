@@ -31,12 +31,13 @@
     roundRectPath,
     type CanvasPalette,
     type PlotGeometry,
+    isPaletteReady,
   } from "./canvasHelpers";
 
   type VisualSample = { time: number; midi: number; confident: boolean };
 
   // --- layout constants ---
-  const VISIBLE_SECONDS = 4;
+  const VISIBLE_SECONDS = 1;
   const CURSOR_POSITION_RATIO = 0.8; // where the playhead sits in the window while playing
 
   const CONTROLS_X_OFFSET = 48;
@@ -45,7 +46,7 @@
   const DEFAULT_HI = 72; // C5
   const MIN_SPAN = 14; // never zoom tighter than this many semitones
 
-  const GUTTER = 44; // left axis column (must match .scroller margin-left)
+  const GUTTER = 44; // left axis column (must match .scrollbar margin-left)
   const NOTE_BAR_WIDTH = 12;
   const CHORD_BAND_H = 62; // px reserved for the chord band (review only)
   const PAD_TOP = 10;
@@ -57,6 +58,18 @@
   // floor duration when resizing, mirrors the segmenter's own MIN_NOTE_DURATION
   // so an edited note can't be dragged shorter than a note would ever be kept
   const MIN_NOTE_SECONDS = 0.08;
+
+  const PALETTE_MAX_RETRIES = 10;
+  export const FALLBACK_PALETTE: CanvasPalette = {
+    accent: "#ffffff",
+    accent2: "#ffffff",
+    accent3: "#ffffff",
+    uncertain: "#ffffff",
+    muted: "#ffffff",
+    text: "#ffffff",
+    line: "#ffffff",
+    raised: "#ffffff",
+  };
 
   // --- viewport / range state ---
   let rangeLo = DEFAULT_LO;
@@ -71,46 +84,45 @@
   let liveMaxMidi = -Infinity;
 
   // --- data state ---
-  const visualHistory: VisualSample[] = []; // raw per-frame samples (live trace)
-  let detectedNotes: Note[] = []; // decided notes from the segmenter (grid bars)
+  const visualSamplesHistory: VisualSample[] = []; // raw per-frame samples (live trace)
+  let detectedNotes: Note[] = [];
   let originalDetectedNotes: Note[] = [];
   let cleanedSamples: Sample[] = []; // cleaned trace shown in review
   let chordSegments: ChordSegment[] = [];
   let keyMode: KeyMode | null = null; // needed to render roman numerals
-  let selectedNoteIndex = $state(-1); // clicked note (highlighted teal)
+  let selectedNoteIndex = $state(-1);
   let playhead: number | null = null;
   let isRecording = false;
 
   let controlsX = $state(-1);
   let controlsY = $state(-1);
   let controlsWidth = $state(0);
-  let selectedNoteLabel = $state(""); // shown in the pill, kept in sync with the selected bar
+  let selectedNoteLabel = $state(""); // shown in the pill
 
-  // which edge of which note is being dragged, if any. Live-updates the note
-  // locally on every move; the parent only hears about it once via
-  // onNoteResized in handleResizeUp (not on every mousemove).
   type ResizeDrag = { edge: "start" | "end"; noteIndex: number } | null;
   let noteResizing: ResizeDrag = null;
 
   type MoveDrag = { noteIndex: number; prevMouseX: number } | null;
   let noteMoving: MoveDrag = null;
-  // the mouseup that ends a drag still fires a trailing click afterwards —
-  // this swallows that one click so it doesn't re-run selection logic
-  let suppressNextClick = false;
+
+  type PointerScrollDrag = { prevMouseX: number } | null;
+  let scrolledByPointer: PointerScrollDrag = null;
 
   // --- DOM refs ---
   let canvasEl: HTMLCanvasElement;
   let controlsEl: HTMLDivElement | undefined = $state();
   let scrollerEl: HTMLDivElement;
-  let spacerWidth = $state(0); // drives the phantom scrollbar's thumb size
+  let scrollbarEl: HTMLDivElement;
+  let spacerWidth = $state(0); // scroll content width — how far the track scrolls
+  // custom scrollbar thumb, in px within the track (see updateThumb)
+  let thumbWidth = $state(0); // 0 means "nothing to scroll" → the bar hides
+  let thumbLeft = $state(0);
+  let scrollPercent = $state(0); // 0–100, for aria-valuenow
 
   // --- per-draw scratch (recomputed every frame; shared with handleClick) ---
   let palette: CanvasPalette = {} as CanvasPalette;
   let geo: PlotGeometry = { bandH: 0, plotTop: 0, plotW: 0, plotH: 0 };
-  // Coordinate maps as stable functions declared ONCE (not re-created per frame).
-  // They read the current geo/range from component scope, so no closures get
-  // allocated in the hot draw loop — that per-frame alloc was starving the audio
-  // rAF loop and thinning out the live trace.
+
   function midiToY(midi: number): number {
     return midiToYPx(midi, geo, rangeLo, rangeHi);
   }
@@ -123,8 +135,24 @@
     return Math.max(0, lastTime - VISIBLE_SECONDS);
   }
 
-  // Ease (live) or snap (review) the vertical range toward the sung pitches.
-  // Live uses confident visual samples; review uses the cleaned samples.
+  function loadPalette(attempt = 0) {
+    palette = readPalette();
+    if (isPaletteReady(palette)) {
+      draw();
+      return;
+    }
+    if (attempt >= PALETTE_MAX_RETRIES) {
+      console.warn(
+        "PitchCanvas: CSS tokens unresolved — falling back to white",
+      );
+      palette = FALLBACK_PALETTE;
+      draw();
+      return;
+    }
+    requestAnimationFrame(() => loadPalette(attempt + 1));
+  }
+
+  // Ease (live) or snap (review) the vertical range toward the sung pitches (only confident).
   function updateRange() {
     const isLive = detectedNotes.length === 0;
     if (isLive) {
@@ -154,9 +182,7 @@
     }
   }
 
-  // ========================================================================
   //  DRAW — orchestrates the per-frame render out of small named steps
-  // ========================================================================
   function draw() {
     if (!canvasEl) return;
 
@@ -416,10 +442,7 @@
     ctx.lineCap = "butt";
   }
 
-  // small "<>" chevrons at the edges of the selected bar — the visual
-  // affordance marking the drag-to-resize zones (± RESIZE_ZONE_WIDTH around
-  // each edge). save()/restore() keeps this from disturbing the bar's own
-  // lineWidth/shadow state for the rest of the draw loop.
+  // small "<>" chevrons at the edges of the selected bar
   function drawResizeHandles(
     ctx: CanvasRenderingContext2D,
     x1: number,
@@ -460,8 +483,8 @@
       // samples are time-ordered, so walk backwards from the newest and stop as
       // soon as one falls off the left edge — everything older is off-screen too.
       // Keeps the trace cost proportional to the visible window, not the whole take.
-      for (let i = visualHistory.length - 1; i >= 0; i--) {
-        const s = visualHistory[i];
+      for (let i = visualSamplesHistory.length - 1; i >= 0; i--) {
+        const s = visualSamplesHistory[i];
         const x = timeToX(s.time);
         if (x <= GUTTER) break;
         if (!Number.isFinite(s.midi)) continue;
@@ -492,7 +515,11 @@
 
   // --- hint shown on the empty canvas before anything is sung ---
   function drawEmptyStateHint(ctx: CanvasRenderingContext2D) {
-    if (visualHistory.length > 0 || detectedNotes.length > 0 || isRecording)
+    if (
+      visualSamplesHistory.length > 0 ||
+      detectedNotes.length > 0 ||
+      isRecording
+    )
       return;
     ctx.font = '12px "Space Mono", monospace';
     ctx.textAlign = "center";
@@ -559,43 +586,17 @@
     onNoteDeleted?.(removedIndex);
   }
 
-  // phantom scrollbar → viewport offset (review mode only; during recording
-  // the spacer is 0-wide so no scrollbar shows and this never fires)
+  // scroll position → viewport offset (review mode only; during recording
+  // the spacer is 0-wide so there's nothing to scroll and this never fires)
   function onScroll() {
     const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
     const frac = max > 0 ? scrollerEl.scrollLeft / max : 0;
     firstVisibleTime = frac * maxFirst();
+    updateThumb();
     draw();
   }
 
-  // click a note bar to select it (highlights teal). The hitbox mirrors exactly
-  // how drawNoteBars draws each bar — same rounded pitch, same gutter clamp —
-  // so a click always lands on what the user sees.
-  function handleClick(event: MouseEvent) {
-    if (suppressNextClick) {
-      suppressNextClick = false;
-      return;
-    }
-    const rect = canvasEl.getBoundingClientRect();
-    const mouseX = event.clientX - rect.left;
-    const mouseY = event.clientY - rect.top;
-    if (playhead !== null) {
-      return;
-    }
-    let hit = -1;
-    for (let i = 0; i < detectedNotes.length; i++) {
-      const note = detectedNotes[i];
-      const x2 = timeToX(note.endTime);
-      if (x2 < GUTTER) continue;
-      if (isMouseInNoteBounds(note, mouseX, mouseY)) {
-        hit = i;
-        onNoteSelected?.(hit);
-        break; // first bar under the cursor wins
-      }
-    }
-    selectedNoteIndex = hit;
-    draw();
-  }
+  // click a note bar to select it (highlights teal).
   function handleKeyDown(event: KeyboardEvent) {
     if (selectedNoteIndex >= 0) {
       if (event.key === "ArrowUp") {
@@ -643,11 +644,30 @@
   }
 
   function handleMouseDown(event: PointerEvent) {
-    if (selectedNoteIndex < 0) return;
-    const note = detectedNotes[selectedNoteIndex];
     const rect = canvasEl.getBoundingClientRect();
     const mouseX = event.clientX - rect.left;
     const mouseY = event.clientY - rect.top;
+    if (playhead !== null) {
+      return;
+    }
+    let hit = -1;
+    for (let i = 0; i < detectedNotes.length; i++) {
+      const note = detectedNotes[i];
+      const x2 = timeToX(note.endTime);
+      if (x2 < GUTTER) continue;
+      if (isMouseInNoteBounds(note, mouseX, mouseY)) {
+        hit = i;
+        break;
+      }
+    }
+    selectedNoteIndex = hit;
+    onNoteSelected?.(hit);
+    draw();
+    if (selectedNoteIndex < 0) {
+      startPointerScroll(mouseX);
+      return;
+    }
+    const note = detectedNotes[selectedNoteIndex];
     const startX = timeToX(note.startTime);
     const endX = timeToX(note.endTime);
     const y = midiToY(Math.round(note.avgMidifloat));
@@ -720,7 +740,6 @@
     window.removeEventListener("pointermove", handleResizeMove);
     window.removeEventListener("pointerup", handleResizeUp);
     noteResizing = null;
-    suppressNextClick = true;
     updateTimelineExtent();
     onNoteResized?.(noteIndex, note.startTime, note.endTime);
   }
@@ -794,7 +813,6 @@
     window.removeEventListener("pointermove", applyMove);
     window.removeEventListener("pointerup", handleMoveUp);
     noteMoving = null;
-    suppressNextClick = true;
     updateTimelineExtent();
     onNoteResized?.(noteIndex, note.startTime, note.endTime);
   }
@@ -802,6 +820,119 @@
   function updateSpacerWidth() {
     const view = scrollerEl.clientWidth || 1;
     spacerWidth = view * Math.max(1, lastTime / VISIBLE_SECONDS);
+  }
+  function startPointerScroll(mouseX: number) {
+    scrolledByPointer = { prevMouseX: mouseX };
+    window.addEventListener("pointermove", applyPointerScroll);
+    window.addEventListener("pointerup", stopPointerScroll);
+  }
+  function applyPointerScroll(event: PointerEvent) {
+    if (!scrolledByPointer) return;
+    const mouseX = event.clientX - canvasEl.getBoundingClientRect().left;
+    const delta = mouseX - scrolledByPointer.prevMouseX;
+    const newScrollLeft = scrollerEl.scrollLeft - delta;
+    const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
+    scrollerEl.scrollLeft = Math.max(0, Math.min(newScrollLeft, max));
+    scrolledByPointer.prevMouseX = mouseX;
+  }
+  function stopPointerScroll() {
+    scrolledByPointer = null;
+    window.removeEventListener("pointermove", applyPointerScroll);
+    window.removeEventListener("pointerup", stopPointerScroll);
+  }
+
+  // --- custom scrollbar ---------------------------------------------------
+  // The native bar can't serve as the visual affordance: mobile browsers draw
+  // overlay scrollbars that ignore ::-webkit-scrollbar and only fade in while
+  // scrolling. So the scroller is hidden but still handles input, and the thumb
+  // is a plain element positioned from the scroller's own numbers.
+
+  const MIN_THUMB_WIDTH = 28; // keep the thumb grabbable on long takes
+
+  function updateThumb() {
+    if (!scrollerEl) return;
+    const track = scrollerEl.clientWidth;
+    const content = scrollerEl.scrollWidth;
+    if (content <= track) {
+      thumbWidth = 0;
+      thumbLeft = 0;
+      scrollPercent = 0;
+      return;
+    }
+    thumbWidth = Math.max(MIN_THUMB_WIDTH, (track * track) / content);
+    const max = content - track;
+    const frac = scrollerEl.scrollLeft / max;
+    thumbLeft = frac * (track - thumbWidth);
+    scrollPercent = Math.round(frac * 100);
+  }
+
+  // Touch swipes reach .scroller and scroll it natively (momentum included), but
+  // a mouse can't swipe and the native thumb is gone — so mouse drags on the
+  // track are mapped onto scrollLeft by hand. Touch is deliberately left alone.
+  let thumbGrabOffset = 0; // px between the pointer and the thumb's left edge
+
+  function onScrollbarPointerDown(event: PointerEvent) {
+    if (event.pointerType !== "mouse" || thumbWidth === 0) return;
+    const x = event.clientX - scrollbarEl.getBoundingClientRect().left;
+    const onThumb = x >= thumbLeft && x <= thumbLeft + thumbWidth;
+    // grabbing the thumb keeps its offset; clicking the bare track centres it
+    thumbGrabOffset = onThumb ? x - thumbLeft : thumbWidth / 2;
+    scrollToThumbX(x - thumbGrabOffset);
+    window.addEventListener("pointermove", onScrollbarPointerMove);
+    window.addEventListener("pointerup", onScrollbarPointerUp);
+  }
+
+  function onScrollbarPointerMove(event: PointerEvent) {
+    const x = event.clientX - scrollbarEl.getBoundingClientRect().left;
+    scrollToThumbX(x - thumbGrabOffset);
+  }
+
+  function onScrollbarPointerUp() {
+    window.removeEventListener("pointermove", onScrollbarPointerMove);
+    window.removeEventListener("pointerup", onScrollbarPointerUp);
+  }
+
+  // a thumb left-edge position (px in the track) → scrollLeft.
+  // Setting scrollLeft fires onScroll, which redraws and re-places the thumb.
+  function scrollToThumbX(x: number) {
+    const track = scrollerEl.clientWidth;
+    const span = track - thumbWidth;
+    const frac = span > 0 ? Math.min(1, Math.max(0, x / span)) : 0;
+    scrollerEl.scrollLeft = frac * (scrollerEl.scrollWidth - track);
+  }
+
+  // the scrollbar is its own focus target, so arrow keys here scroll the take —
+  // the canvas keeps its own arrow-key handling for nudging a selected note
+  function onScrollbarKeyDown(event: KeyboardEvent) {
+    if (thumbWidth === 0) return;
+    const page = scrollerEl.clientWidth;
+    let delta = 0;
+    switch (event.key) {
+      case "ArrowLeft":
+        delta = -page / 10;
+        break;
+      case "ArrowRight":
+        delta = page / 10;
+        break;
+      case "PageUp":
+        delta = -page;
+        break;
+      case "PageDown":
+        delta = page;
+        break;
+      case "Home":
+        scrollerEl.scrollLeft = 0;
+        event.preventDefault();
+        return;
+      case "End":
+        scrollerEl.scrollLeft = scrollerEl.scrollWidth;
+        event.preventDefault();
+        return;
+      default:
+        return;
+    }
+    scrollerEl.scrollLeft += delta;
+    event.preventDefault();
   }
 
   function updateTimelineExtent() {
@@ -813,12 +944,15 @@
     }
   }
   onMount(() => {
-    palette = readPalette();
+    loadPalette();
     draw(); // show the grid + hint before any recording starts
     // web fonts arrive async — redraw once loaded so canvas text uses them
     document.fonts?.ready.then(() => draw());
     // responsive: re-render crisply whenever the container resizes
-    const ro = new ResizeObserver(() => draw());
+    const ro = new ResizeObserver(() => {
+      updateThumb(); // track width changed — the thumb's scale did too
+      draw();
+    });
     ro.observe(canvasEl);
     return () => ro.disconnect();
   });
@@ -830,11 +964,23 @@
     }
   });
 
+  // spacerWidth changes the scroller's content width, but only once the DOM has
+  // applied it — an effect runs after that, so every caller gets a correct thumb
+  // without having to remember to update it
+  $effect(() => {
+    spacerWidth;
+    untrack(() => updateThumb());
+  });
+
   // safety net: if the component is torn down mid-drag (e.g. "Start over"
   // clicked while resizing), don't leave orphaned window listeners behind
   onDestroy(() => {
     window.removeEventListener("pointermove", handleResizeMove);
     window.removeEventListener("pointerup", handleResizeUp);
+    window.removeEventListener("pointermove", onScrollbarPointerMove);
+    window.removeEventListener("pointerup", onScrollbarPointerUp);
+    window.removeEventListener("pointermove", applyPointerScroll);
+    window.removeEventListener("pointerup", stopPointerScroll);
   });
 
   function isMouseInNoteBounds(
@@ -859,7 +1005,7 @@
 
   // store a raw sample; drawing is driven by tick(), not here
   export function push(time: number, midi: number, confident: boolean) {
-    visualHistory.push({ time, midi, confident });
+    visualSamplesHistory.push({ time, midi, confident });
     // keep the running range current so updateRange stays O(1)
     if (confident && Number.isFinite(midi)) {
       if (midi < liveMinMidi) liveMinMidi = midi;
@@ -875,7 +1021,7 @@
   }
 
   export function clear() {
-    visualHistory.length = 0;
+    visualSamplesHistory.length = 0;
     detectedNotes = [];
     originalDetectedNotes = [];
     chordSegments = [];
@@ -963,7 +1109,6 @@
     tabindex="0"
     class="trace"
     bind:this={canvasEl}
-    onclick={handleClick}
     onpointerdown={handleMouseDown}
     onpointermove={handleCanvasHover}
     onkeydown={handleKeyDown}
@@ -1015,8 +1160,33 @@
       </button>
     </div>
   {/if}
-  <div class="scroller" bind:this={scrollerEl} onscroll={onScroll}>
-    <div class="spacer" style:width="{spacerWidth}px"></div>
+  <div
+    class="scrollbar"
+    class:scrollbar--empty={thumbWidth === 0}
+    bind:this={scrollbarEl}
+    onpointerdown={onScrollbarPointerDown}
+    onkeydown={onScrollbarKeyDown}
+    role="scrollbar"
+    tabindex="0"
+    aria-label="Scroll through the recording"
+    aria-orientation="horizontal"
+    aria-controls="pitch-scroller"
+    aria-valuenow={scrollPercent}
+  >
+    <div
+      class="scroller"
+      id="pitch-scroller"
+      tabindex="-1"
+      bind:this={scrollerEl}
+      onscroll={onScroll}
+    >
+      <div class="spacer" style:width="{spacerWidth}px"></div>
+    </div>
+    <div
+      class="scrollbar__thumb"
+      style:width="{thumbWidth}px"
+      style:transform="translate({thumbLeft}px, -50%)"
+    ></div>
   </div>
 </div>
 
@@ -1132,38 +1302,79 @@
     color: var(--accent-2);
   }
 
-  /* phantom scrollbar — empty track, only the spacer creates overflow */
-  .scroller {
-    overflow-x: auto;
-    overflow-y: hidden;
+  /* Custom scrollbar. The native bar is hidden and used only as an input
+     surface: mobile browsers draw overlay scrollbars that ignore
+     ::-webkit-scrollbar and only fade in mid-scroll, so it can't be the thing
+     the user sees. The groove and thumb below are ours, and look the same
+     everywhere. */
+  .scrollbar {
+    position: relative;
+    height: 20px; /* touch target — deliberately taller than the 8px groove */
     margin-top: 6px;
     /* leave room for the gutter so the bar lines up with the plot, not the axis */
     margin-left: 44px;
+    /* touch-action left at default on purpose: the browser then routes
+       horizontal swipes to .scroller and vertical ones to the page */
+    user-select: none; /* a mouse drag shouldn't select surrounding text */
+  }
+
+  /* nothing to scroll (recording, or a take that fits) — hide, but keep the
+     space so the canvas above doesn't jump when a take finishes */
+  .scrollbar--empty {
+    visibility: hidden;
+  }
+
+  .scrollbar:focus-visible {
+    outline: 2px solid var(--accent-3);
+    outline-offset: 2px;
+    border-radius: 999px;
+  }
+  .scrollbar:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* the groove */
+  .scrollbar::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 8px;
+    transform: translateY(-50%);
+    background: var(--raised);
+    border-radius: 999px;
+    pointer-events: none;
+  }
+
+  /* the real scroller: covers the whole track, invisible, handles touch */
+  .scroller {
+    position: absolute;
+    inset: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none; /* Firefox */
+  }
+  .scroller::-webkit-scrollbar {
+    display: none; /* Chrome, Edge, Safari */
   }
   .spacer {
-    height: 1px; /* invisible; just needs to be wider than the track to show a bar */
+    height: 100%; /* full height so the drag surface covers the whole track */
   }
 
-  /* WebKit / Blink (Chrome, Edge, Safari) */
-  .scroller::-webkit-scrollbar {
-    height: 9px;
-  }
-  .scroller::-webkit-scrollbar-track {
-    background: var(--raised);
-    border-radius: 6px;
-  }
-  .scroller::-webkit-scrollbar-thumb {
+  /* visual only — pointer events belong to .scroller underneath */
+  .scrollbar__thumb {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    height: 8px;
     background: var(--line-strong);
-    border-radius: 6px;
-    border: 2px solid var(--raised); /* inset look */
+    border-radius: 999px;
+    pointer-events: none;
+    transition: background 0.15s ease;
   }
-  .scroller::-webkit-scrollbar-thumb:hover {
+  .scrollbar:hover .scrollbar__thumb,
+  .scrollbar:active .scrollbar__thumb {
     background: var(--accent);
-  }
-
-  /* Firefox */
-  .scroller {
-    scrollbar-width: thin;
-    scrollbar-color: var(--line-strong) var(--raised);
   }
 </style>

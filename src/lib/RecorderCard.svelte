@@ -247,6 +247,7 @@
         recomputeAfterNoteChange();
       }}
       onNoteSelected={(index) => {
+        if (index < 0) return;
         tonePlayer.previewNote(playableNotes[index].avgMidifloat);
       }}
       onSpacePressed={() => togglePlayback()}
