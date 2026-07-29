@@ -47,14 +47,14 @@
   const MIN_SPAN = 14; // never zoom tighter than this many semitones
 
   const GUTTER = 44; // left axis column (must match .scrollbar margin-left)
-  const NOTE_BAR_WIDTH = 12;
+  const NOTE_BAR_WIDTH = 15;
   const CHORD_BAND_H = 62; // px reserved for the chord band (review only)
   const PAD_TOP = 10;
   const PAD_BOTTOM = 24; // leaves room for the time ticks
 
   // horizontal margin, in px, on each side of a selected bar's edges where a
   // drag resizes it (independent of NOTE_BAR_WIDTH, which is vertical thickness)
-  const RESIZE_ZONE_WIDTH = 10;
+  const RESIZE_ZONE_WIDTH = 15;
   // floor duration when resizing, mirrors the segmenter's own MIN_NOTE_DURATION
   // so an edited note can't be dragged shorter than a note would ever be kept
   const MIN_NOTE_SECONDS = 0.08;
@@ -670,11 +670,6 @@
     const note = detectedNotes[selectedNoteIndex];
     const startX = timeToX(note.startTime);
     const endX = timeToX(note.endTime);
-    const y = midiToY(Math.round(note.avgMidifloat));
-    const withinY =
-      mouseY >= y - NOTE_BAR_WIDTH / 2 - 4 &&
-      mouseY <= y + NOTE_BAR_WIDTH / 2 + 4;
-    if (!withinY) return;
 
     if (inResizeZone(mouseX, startX, startX, endX)) {
       startResize("start", selectedNoteIndex);
@@ -760,8 +755,8 @@
     const endX = timeToX(note.endTime);
     const y = midiToY(Math.round(note.avgMidifloat));
     const withinY =
-      mouseY >= y - NOTE_BAR_WIDTH / 2 - 4 &&
-      mouseY <= y + NOTE_BAR_WIDTH / 2 + 4;
+      mouseY >= y - NOTE_BAR_WIDTH / 2 - 8 &&
+      mouseY <= y + NOTE_BAR_WIDTH / 2 + 8;
     const nearEdge =
       withinY &&
       (inResizeZone(mouseX, startX, startX, endX) ||
@@ -866,13 +861,12 @@
     scrollPercent = Math.round(frac * 100);
   }
 
-  // Touch swipes reach .scroller and scroll it natively (momentum included), but
-  // a mouse can't swipe and the native thumb is gone — so mouse drags on the
-  // track are mapped onto scrollLeft by hand. Touch is deliberately left alone.
+  // Touch swipes reach .scroller and scroll it natively
   let thumbGrabOffset = 0; // px between the pointer and the thumb's left edge
 
   function onScrollbarPointerDown(event: PointerEvent) {
-    if (event.pointerType !== "mouse" || thumbWidth === 0) return;
+    if (thumbWidth === 0) return;
+    scrollbarEl.setPointerCapture(event.pointerId);
     const x = event.clientX - scrollbarEl.getBoundingClientRect().left;
     const onThumb = x >= thumbLeft && x <= thumbLeft + thumbWidth;
     // grabbing the thumb keeps its offset; clicking the bare track centres it
@@ -989,6 +983,7 @@
     mouseY: number,
   ): boolean {
     const x_tolerance = 4;
+    const y_tolerance = 8;
     if (!note) return false;
     const x1 = timeToX(note.startTime);
     const x2 = timeToX(note.endTime);
@@ -996,8 +991,8 @@
     return (
       mouseX >= x1 - x_tolerance &&
       mouseX <= x2 + x_tolerance &&
-      mouseY >= y - NOTE_BAR_WIDTH / 2 &&
-      mouseY <= y + NOTE_BAR_WIDTH / 2
+      mouseY >= y - NOTE_BAR_WIDTH / 2 - y_tolerance &&
+      mouseY <= y + NOTE_BAR_WIDTH / 2 + y_tolerance
     );
   }
 
@@ -1305,21 +1300,18 @@
   /* Custom scrollbar. The native bar is hidden and used only as an input
      surface: mobile browsers draw overlay scrollbars that ignore
      ::-webkit-scrollbar and only fade in mid-scroll, so it can't be the thing
-     the user sees. The groove and thumb below are ours, and look the same
-     everywhere. */
+     the user sees.  */
   .scrollbar {
     position: relative;
-    height: 20px; /* touch target — deliberately taller than the 8px groove */
+    height: 20px;
     margin-top: 6px;
     /* leave room for the gutter so the bar lines up with the plot, not the axis */
     margin-left: 44px;
-    /* touch-action left at default on purpose: the browser then routes
-       horizontal swipes to .scroller and vertical ones to the page */
+    touch-action: pan-y; /* vertical stays page scroll; horizontal is ours */
+    user-select: none;
     user-select: none; /* a mouse drag shouldn't select surrounding text */
   }
 
-  /* nothing to scroll (recording, or a take that fits) — hide, but keep the
-     space so the canvas above doesn't jump when a take finishes */
   .scrollbar--empty {
     visibility: hidden;
   }
@@ -1359,7 +1351,7 @@
     display: none; /* Chrome, Edge, Safari */
   }
   .spacer {
-    height: 100%; /* full height so the drag surface covers the whole track */
+    height: 100%;
   }
 
   /* visual only — pointer events belong to .scroller underneath */
