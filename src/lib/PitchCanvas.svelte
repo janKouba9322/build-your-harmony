@@ -13,7 +13,7 @@
   // The heavy per-frame work lives in draw(), which is split into small
   // drawXxx() steps for readability. Pure geometry/palette/range helpers live
   // in ./canvasHelpers so this file stays focused on orchestration and state.
-  import { onMount, onDestroy, tick as domTick, untrack } from "svelte";
+  import { onMount, onDestroy, untrack } from "svelte";
   import {
     midiToName,
     degreeNumeral,
@@ -113,9 +113,7 @@
   // --- DOM refs ---
   let canvasEl: HTMLCanvasElement;
   let controlsEl: HTMLDivElement | undefined = $state();
-  let scrollerEl: HTMLDivElement;
   let scrollbarEl: HTMLDivElement;
-  let spacerWidth = $state(0); // scroll content width — how far the track scrolls
   // custom scrollbar thumb, in px within the track (see updateThumb)
   let thumbWidth = $state(0); // 0 means "nothing to scroll" → the bar hides
   let thumbLeft = $state(0);
@@ -588,12 +586,12 @@
     onNoteDeleted?.(removedIndex);
   }
 
-  // scroll position → viewport offset (review mode only; during recording
-  // the spacer is 0-wide so there's nothing to scroll and this never fires)
-  function onScroll() {
-    const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
-    const frac = max > 0 ? scrollerEl.scrollLeft / max : 0;
-    firstVisibleTime = frac * maxFirst();
+  // move the viewport to a given left edge, clamped to the take. Every scroll
+  // path (canvas drag, thumb drag, keyboard) funnels through here.
+  function setFirstVisibleTime(t: number) {
+    const next = Math.max(0, Math.min(t, maxFirst()));
+    if (next === firstVisibleTime) return;
+    firstVisibleTime = next;
     updateThumb();
     draw();
   }
@@ -814,56 +812,53 @@
     onNoteResized?.(noteIndex, note.startTime, note.endTime);
   }
 
-  function updateSpacerWidth() {
-    const view = scrollerEl.clientWidth || 1;
-    spacerWidth = view * Math.max(1, lastTime / visibleSeconds);
-  }
   function startPointerScroll(mouseX: number) {
     scrolledByPointer = { prevMouseX: mouseX };
     window.addEventListener("pointermove", applyPointerScroll);
     window.addEventListener("pointerup", stopPointerScroll);
+    window.addEventListener("pointercancel", stopPointerScroll);
   }
   function applyPointerScroll(event: PointerEvent) {
     if (!scrolledByPointer) return;
     const mouseX = event.clientX - canvasEl.getBoundingClientRect().left;
     const delta = mouseX - scrolledByPointer.prevMouseX;
-    const newScrollLeft = scrollerEl.scrollLeft - delta;
-    const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
-    scrollerEl.scrollLeft = Math.max(0, Math.min(newScrollLeft, max));
+    // drag right → look further back in time, so the content follows the finger
+    const deltaTime = (delta / geo.plotW) * visibleSeconds;
+    setFirstVisibleTime(firstVisibleTime - deltaTime);
     scrolledByPointer.prevMouseX = mouseX;
   }
   function stopPointerScroll() {
     scrolledByPointer = null;
     window.removeEventListener("pointermove", applyPointerScroll);
     window.removeEventListener("pointerup", stopPointerScroll);
+    window.removeEventListener("pointercancel", stopPointerScroll);
   }
 
   // --- custom scrollbar ---------------------------------------------------
-  // The native bar can't serve as the visual affordance: mobile browsers draw
-  // overlay scrollbars that ignore ::-webkit-scrollbar and only fade in while
-  // scrolling. So the scroller is hidden but still handles input, and the thumb
-  // is a plain element positioned from the scroller's own numbers.
+  // Purely our own: track, thumb and input.
 
   const MIN_THUMB_WIDTH = 28; // keep the thumb grabbable on long takes
 
   function updateThumb() {
-    if (!scrollerEl) return;
-    const track = scrollerEl.clientWidth;
-    const content = scrollerEl.scrollWidth;
-    if (content <= track) {
+    const track = scrollbarEl?.clientWidth ?? 0;
+    const top = maxFirst();
+    if (track <= 0 || top <= 0) {
       thumbWidth = 0;
       thumbLeft = 0;
       scrollPercent = 0;
       return;
     }
-    thumbWidth = Math.max(MIN_THUMB_WIDTH, (track * track) / content);
-    const max = content - track;
-    const frac = scrollerEl.scrollLeft / max;
-    thumbLeft = frac * (track - thumbWidth);
+    // the thumb covers as much of the track as the window covers of the take
+    const width = Math.max(
+      MIN_THUMB_WIDTH,
+      track * (visibleSeconds / lastTime),
+    );
+    const frac = firstVisibleTime / top;
+    thumbWidth = width;
+    thumbLeft = frac * (track - width);
     scrollPercent = Math.round(frac * 100);
   }
 
-  // Touch swipes reach .scroller and scroll it natively
   let thumbGrabOffset = 0; // px between the pointer and the thumb's left edge
 
   function onScrollbarPointerDown(event: PointerEvent) {
@@ -876,6 +871,7 @@
     scrollToThumbX(x - thumbGrabOffset);
     window.addEventListener("pointermove", onScrollbarPointerMove);
     window.addEventListener("pointerup", onScrollbarPointerUp);
+    window.addEventListener("pointercancel", onScrollbarPointerUp);
   }
 
   function onScrollbarPointerMove(event: PointerEvent) {
@@ -886,48 +882,42 @@
   function onScrollbarPointerUp() {
     window.removeEventListener("pointermove", onScrollbarPointerMove);
     window.removeEventListener("pointerup", onScrollbarPointerUp);
+    window.removeEventListener("pointercancel", onScrollbarPointerUp);
   }
 
-  // a thumb left-edge position (px in the track) → scrollLeft.
-  // Setting scrollLeft fires onScroll, which redraws and re-places the thumb.
+  // a thumb left-edge position (px in the track) → viewport offset
   function scrollToThumbX(x: number) {
-    const track = scrollerEl.clientWidth;
-    const span = track - thumbWidth;
-    const frac = span > 0 ? Math.min(1, Math.max(0, x / span)) : 0;
-    scrollerEl.scrollLeft = frac * (scrollerEl.scrollWidth - track);
+    const span = (scrollbarEl?.clientWidth ?? 0) - thumbWidth;
+    if (span <= 0) return;
+    setFirstVisibleTime((x / span) * maxFirst());
   }
 
   // the scrollbar is its own focus target, so arrow keys here scroll the take —
   // the canvas keeps its own arrow-key handling for nudging a selected note
   function onScrollbarKeyDown(event: KeyboardEvent) {
     if (thumbWidth === 0) return;
-    const page = scrollerEl.clientWidth;
-    let delta = 0;
     switch (event.key) {
       case "ArrowLeft":
-        delta = -page / 10;
+        setFirstVisibleTime(firstVisibleTime - visibleSeconds / 10);
         break;
       case "ArrowRight":
-        delta = page / 10;
+        setFirstVisibleTime(firstVisibleTime + visibleSeconds / 10);
         break;
       case "PageUp":
-        delta = -page;
+        setFirstVisibleTime(firstVisibleTime - visibleSeconds);
         break;
       case "PageDown":
-        delta = page;
+        setFirstVisibleTime(firstVisibleTime + visibleSeconds);
         break;
       case "Home":
-        scrollerEl.scrollLeft = 0;
-        event.preventDefault();
-        return;
+        setFirstVisibleTime(0);
+        break;
       case "End":
-        scrollerEl.scrollLeft = scrollerEl.scrollWidth;
-        event.preventDefault();
-        return;
+        setFirstVisibleTime(maxFirst());
+        break;
       default:
         return;
     }
-    scrollerEl.scrollLeft += delta;
     event.preventDefault();
   }
 
@@ -936,7 +926,8 @@
     const newLastTime = last ? last.endTime : 0;
     if (newLastTime !== lastTime) {
       lastTime = newLastTime + 0.1;
-      updateSpacerWidth();
+      firstVisibleTime = Math.min(firstVisibleTime, maxFirst());
+      updateThumb();
     }
   }
 
@@ -951,18 +942,10 @@
     visibleSeconds = next;
     return true;
   }
-  async function applyVisibleSecondsChange() {
-    if (isRecording) {
-      draw(); // the cursor drives the viewport while recording; no scroller yet
-      return;
+  function applyVisibleSecondsChange() {
+    if (!isRecording) {
+      firstVisibleTime = Math.min(firstVisibleTime, maxFirst());
     }
-    const anchor = Math.min(firstVisibleTime, maxFirst());
-    firstVisibleTime = anchor;
-    updateSpacerWidth();
-    await domTick();
-    const max = scrollerEl.scrollWidth - scrollerEl.clientWidth;
-    const top = maxFirst();
-    scrollerEl.scrollLeft = top > 0 ? (anchor / top) * max : 0; // …then re-anchor
     updateThumb();
     draw();
   }
@@ -992,21 +975,19 @@
     }
   });
 
-  // spacerWidth changes the scroller's content width, but only once the DOM has
-  // applied it — an effect runs after that, so every caller gets a correct thumb
-  // without having to remember to update it
-  $effect(() => {
-    spacerWidth;
-    untrack(() => updateThumb());
-  });
-
   onDestroy(() => {
     window.removeEventListener("pointermove", handleResizeMove);
     window.removeEventListener("pointerup", handleResizeUp);
+    window.removeEventListener("pointercancel", handleResizeUp);
+    window.removeEventListener("pointermove", applyMove);
+    window.removeEventListener("pointerup", handleMoveUp);
+    window.removeEventListener("pointercancel", handleMoveUp);
     window.removeEventListener("pointermove", onScrollbarPointerMove);
     window.removeEventListener("pointerup", onScrollbarPointerUp);
+    window.removeEventListener("pointercancel", onScrollbarPointerUp);
     window.removeEventListener("pointermove", applyPointerScroll);
     window.removeEventListener("pointerup", stopPointerScroll);
+    window.removeEventListener("pointercancel", stopPointerScroll);
   });
 
   function isMouseInNoteBounds(
@@ -1059,11 +1040,11 @@
     rangeHi = DEFAULT_HI;
     firstVisibleTime = 0;
     lastTime = 0;
-    spacerWidth = 0;
     isRecording = false;
     selectedNoteIndex = -1;
     liveMinMidi = Infinity;
     liveMaxMidi = -Infinity;
+    updateThumb();
     draw();
   }
 
@@ -1074,7 +1055,7 @@
 
   // freeze into review mode: store results, size the scrollbar to the take and
   // jump to the end (keyInfo brings the mode for the roman numerals)
-  export async function finish(
+  export function finish(
     _notes: Note[],
     _chordSegments: ChordSegment[],
     _cleanedSamples: Sample[],
@@ -1087,9 +1068,8 @@
     cleanedSamples = _cleanedSamples.filter((s) => Number.isFinite(s.midi));
     keyMode = _keyInfo?.mode ?? null;
     lastTime += 0.1;
-    updateSpacerWidth();
-    await domTick(); // wait for the spacer to actually widen…
-    scrollerEl.scrollLeft = scrollerEl.scrollWidth; // …then pin the thumb right (triggers onScroll → redraw)
+    firstVisibleTime = maxFirst(); // land on the end of the take
+    updateThumb();
     draw();
   }
   export function refreshAfterEdit(
@@ -1133,6 +1113,7 @@
 
 <div class="trace-wrap">
   <canvas
+    id="pitch-trace"
     tabindex="0"
     class="trace"
     bind:this={canvasEl}
@@ -1197,18 +1178,9 @@
     tabindex="0"
     aria-label="Scroll through the recording"
     aria-orientation="horizontal"
-    aria-controls="pitch-scroller"
+    aria-controls="pitch-trace"
     aria-valuenow={scrollPercent}
   >
-    <div
-      class="scroller"
-      id="pitch-scroller"
-      tabindex="-1"
-      bind:this={scrollerEl}
-      onscroll={onScroll}
-    >
-      <div class="spacer" style:width="{spacerWidth}px"></div>
-    </div>
     <div
       class="scrollbar__thumb"
       style:width="{thumbWidth}px"
@@ -1329,17 +1301,13 @@
     color: var(--accent-2);
   }
 
-  /* Custom scrollbar. The native bar is hidden and used only as an input
-     surface: mobile browsers draw overlay scrollbars that ignore
-     ::-webkit-scrollbar and only fade in mid-scroll, so it can't be the thing
-     the user sees.  */
+  /* Custom scrollbar */
   .scrollbar {
     position: relative;
-    height: 20px;
+    height: 24px;
     margin-top: 6px;
-    /* leave room for the gutter so the bar lines up with the plot, not the axis */
     margin-left: 44px;
-    touch-action: pan-y;
+    touch-action: pan-y; /* vertical stays page scroll; horizontal is ours */
     user-select: none; /* a mouse drag shouldn't select surrounding text */
   }
 
@@ -1370,24 +1338,7 @@
     pointer-events: none;
   }
 
-  /* the real scroller: covers the whole track, invisible, handles touch */
-  .scroller {
-    position: absolute;
-    inset: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none; /* Firefox */
-    touch-action: pan-y; /* vertical stays page scroll; horizontal is ours */
-    user-select: none;
-  }
-  .scroller::-webkit-scrollbar {
-    display: none; /* Chrome, Edge, Safari */
-  }
-  .spacer {
-    height: 100%;
-  }
-
-  /* visual only — pointer events belong to .scroller underneath */
+  /* visual only — pointer events belong to .scrollbar itself */
   .scrollbar__thumb {
     position: absolute;
     top: 50%;
