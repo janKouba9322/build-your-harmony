@@ -4,7 +4,7 @@ Sing or hum a melody into your browser. It transcribes the notes, estimates the
 key, and derives a chord progression underneath — entirely client-side, with no
 audio ever leaving your device.
 
-**[Try it →](#)** <!-- TODO: live URL -->
+**[Try it →](https://build-your-harmony.pages.dev)**
 
 <!-- TODO: screenshot or short GIF of the canvas right here.
      This is a visual app — the image does more than any paragraph below. -->
@@ -49,12 +49,12 @@ pnpm install
 pnpm dev
 ```
 
-| Command | Effect |
-| --- | --- |
-| `pnpm dev` | dev server with HMR |
-| `pnpm build` | production build into `dist/` |
+| Command        | Effect                             |
+| -------------- | ---------------------------------- |
+| `pnpm dev`     | dev server with HMR                |
+| `pnpm build`   | production build into `dist/`      |
 | `pnpm preview` | serve the production build locally |
-| `pnpm check` | `svelte-check` over the project |
+| `pnpm check`   | `svelte-check` over the project    |
 
 The build output is fully static — any static host will serve it (Vercel,
 Netlify, Cloudflare Pages). No environment variables, no backend.
@@ -136,17 +136,17 @@ swallow the next note.
 
 A sample joins the current note if it is within `MIDI_THRESHOLD` of the anchor.
 Otherwise, if the previous note ended within `MAX_GAP_DURATION` and the sample
-fits *its* anchor, that note is popped back off the output and resumed — this is
+fits _its_ anchor, that note is popped back off the output and resumed — this is
 what stops a brief detection dropout from splitting one sustained note in two.
 Failing both, the current note is closed and a new one opened.
 
-| Constant | Value | Purpose |
-| --- | --- | --- |
-| `MIDI_THRESHOLD` | 1 semitone | how close a sample must sit to the anchor |
-| `ANCHOR_LOCK_FRAME_LENGTH` | 15 frames | anchor freezes after this many samples |
-| `MIN_NOTE_DURATION` | 0.08 s | shorter notes are discarded |
-| `MIN_NOTE_FRAME_LENGTH` | 8 frames | guards against sparse, unreliable notes |
-| `MAX_GAP_DURATION` | 0.1 s | dropout window for resuming the previous note |
+| Constant                   | Value      | Purpose                                       |
+| -------------------------- | ---------- | --------------------------------------------- |
+| `MIDI_THRESHOLD`           | 1 semitone | how close a sample must sit to the anchor     |
+| `ANCHOR_LOCK_FRAME_LENGTH` | 15 frames  | anchor freezes after this many samples        |
+| `MIN_NOTE_DURATION`        | 0.08 s     | shorter notes are discarded                   |
+| `MIN_NOTE_FRAME_LENGTH`    | 8 frames   | guards against sparse, unreliable notes       |
+| `MAX_GAP_DURATION`         | 0.1 s      | dropout window for resuming the previous note |
 
 Both minimum thresholds must pass; duration alone would admit a note built from
 two samples 90 ms apart.
@@ -276,9 +276,9 @@ No UI framework, no component library, no charting library.
 
 Built by [janKouba9322](https://github.com/janKouba9322).
 
-- Pitch detection: McLeod & Wyvill, *A Smarter Way to Find Pitch* (2005), via
+- Pitch detection: McLeod & Wyvill, _A Smarter Way to Find Pitch_ (2005), via
   [pitchy](https://github.com/ianprime0509/pitchy)
-- Key profiles: Temperley, *What's Key for Key?* (1999), Kostka-Payne corpus
+- Key profiles: Temperley, _What's Key for Key?_ (1999), Kostka-Payne corpus
 - Comparison profiles: Krumhansl & Kessler (1982)
 
 ## License
