@@ -37,7 +37,7 @@
   type VisualSample = { time: number; midi: number; confident: boolean };
 
   // --- layout constants ---
-  const VISIBLE_SECONDS = 1;
+  const VISIBLE_SECONDS = 3;
   const CURSOR_POSITION_RATIO = 0.8; // where the playhead sits in the window while playing
 
   const CONTROLS_X_OFFSET = 48;
